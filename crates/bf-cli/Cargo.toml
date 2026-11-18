@@ -1,0 +1,13 @@
+[package]
+name = "bf-cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "byteflow-crypto"
+path = "src/main.rs"
+
+[dependencies]
+bf-core.workspace = true
+zeroize.workspace = true

@@ -1,0 +1,10 @@
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
+# Builds are release-only (bf-core/build.rs refuses the debug profile).
+[alias]
+rb = "build --release"
+rr = "run --release -p byteflow"
+rt = "test --release --workspace"
+rc = "check --release --workspace --all-targets"
+rclippy = "clippy --release --workspace --all-targets"

@@ -1,0 +1,73 @@
+[package]
+name = "byteflow"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "ByteFlow Desktop — single-user Cloudflare R2 file vault"
+
+[[bin]]
+name = "byteflow"
+path = "src/main.rs"
+
+[features]
+# Developer conveniences for UI work (never enabled by scripts/build.ps1):
+# BYTEFLOW_DEV_DATA_DIR (throwaway vault) and BYTEFLOW_DEV_ALLOW_CAPTURE
+# (screenshots). Off in every shipped build.
+dev-env = []
+
+[dependencies]
+bf-core.workspace = true
+bf-data.workspace = true
+bf-app.workspace = true
+zeroize.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+image.workspace = true
+chrono.workspace = true
+futures.workspace = true
+# glow (OpenGL) instead of the default wgpu: far fewer crates, faster builds,
+# smaller binary. No accesskit/system fonts/persistence (nothing is written
+# to disk by the UI toolkit).
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "wayland", "x11"] }
+# Bundled monochrome emoji/symbol fonts (opt-in since egui 0.37) for icons.
+egui = { version = "0.37", default-features = false, features = ["monochrome_emoji_fonts"] }
+rfd = { version = "0.16", default-features = false }
+raw-window-handle = "0.6"
+# Right-to-left (Arabic) text: UAX #9 reordering. egui shapes but has no bidi.
+unicode-bidi = "0.3"
+unicode-segmentation = "1"
+
+[build-dependencies]
+# Embeds the app icon + version info (build.rs; needs rc.exe from the Windows SDK).
+embed-resource = "3"
+
+[dev-dependencies]
+# Font coverage checks (already in the tree through epaint).
+skrifa = "0.44"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_System_StationsAndDesktops",
+] }
+# Built-in audio/video playback: Media Foundation Media Engine + D3D11.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Power",
+] }
+# `#[implement]` (the media engine's event callback) expands to `windows_core::`.
+windows-core = "0.62"

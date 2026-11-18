@@ -1,0 +1,22 @@
+[package]
+name = "bf-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+aes-gcm.workspace = true
+argon2.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
+getrandom.workspace = true
+rayon.workspace = true
+base64.workspace = true
+serde.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

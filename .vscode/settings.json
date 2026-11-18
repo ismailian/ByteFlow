@@ -1,0 +1,5 @@
+{
+  // Builds are release-only (bf-core/build.rs refuses the debug profile),
+  // so rust-analyzer checks with --release too.
+  "rust-analyzer.cargo.extraArgs": ["--release"]
+}
