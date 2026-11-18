@@ -77,8 +77,19 @@ fn group_label(ui: &mut egui::Ui, p: &Palette, text: &str) {
 
 impl Shell {
     pub fn new(_ctx: &AppCtx, session: &Arc<Session>) -> Self {
+        #[cfg(feature = "dev-env")]
+        let page = match crate::demo::env("BYTEFLOW_DEV_PAGE").as_deref() {
+            Some("transfers") => Page::Transfers,
+            Some("encryption") => Page::Encryption,
+            Some("sync") => Page::Sync,
+            Some("links") => Page::Links,
+            Some("settings") => Page::Settings,
+            _ => Page::Files,
+        };
+        #[cfg(not(feature = "dev-env"))]
+        let page = Page::Files;
         Self {
-            page: Page::Files,
+            page,
             files: files::FilesPage::default(),
             transfers: transfers::TransfersPage::default(),
             encryption: encryption::EncryptionPage::default(),

@@ -36,7 +36,14 @@ impl ByteFlowApp {
         theme::install_fonts(&cc.egui_ctx);
         let auth = AuthController::new(core.clone());
         let ctx = AppCtx { rt, auth: auth.clone(), core, egui: cc.egui_ctx.clone(), toasts: Toasts::default() };
-        ctx.spawn(async move { auth.init().await });
+        ctx.spawn(async move {
+            auth.init().await;
+            // dev-env demo: unlock the seeded vault straight away.
+            #[cfg(feature = "dev-env")]
+            if crate::demo::enabled() {
+                auth.submit_password(zeroize::Zeroizing::new(crate::demo::PASSWORD.as_bytes().to_vec())).await;
+            }
+        });
         let repaint = cc.egui_ctx.clone();
         let os_locked = platform::oslock::spawn(move || repaint.request_repaint());
         // Apply capture exclusion as early as possible.

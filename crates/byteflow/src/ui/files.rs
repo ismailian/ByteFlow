@@ -409,6 +409,12 @@ impl FilesPage {
         #[cfg(feature = "dev-env")]
         if !self.dev_viewed {
             self.dev_viewed = true;
+            if let Some(prefix) = crate::demo::env("BYTEFLOW_DEV_PREFIX") {
+                self.open_folder(ctx, session, &prefix);
+            }
+            if let Some(key) = crate::demo::env("BYTEFLOW_DEV_SELECT") {
+                self.selection.insert(key);
+            }
             if let Some(p) = std::env::var_os("BYTEFLOW_DEV_VIEW") {
                 self.viewer = Some(Viewer::open_local(&egui_ctx, Path::new(&p)));
             }

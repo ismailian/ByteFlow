@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ByteFlow — Your encrypted file vault for Cloudflare R2</title>
+  <meta name="description" content="ByteFlow is a Windows app that turns your own Cloudflare R2 bucket into a private file vault: browse, preview, upload and share, with AES-256-GCM encryption on your computer before anything leaves it.">
+  <meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="ByteFlow — Your encrypted file vault for Cloudflare R2">
+  <meta property="og:description" content="Your files, in your own bucket, encrypted before they leave your computer. No ByteFlow account, no ByteFlow server.">
+  <meta property="og:image" content="assets/photos-grid-light.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" href="assets/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/icon.png">
+  <link rel="preload" href="assets/fonts/PlusJakartaSans-Regular.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="preload" href="assets/fonts/PlusJakartaSans-Bold.ttf" as="font" type="font/ttf" crossorigin>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg class="sprite" width="0" height="0" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14 9l2 2"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.5 11a4 4 0 0 1-2 8z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+  <symbol id="i-user-x" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M17 8l4 4M21 8l-4 4"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M10 2h4"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6C3.9 8.4 2 12 2 12s4 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+  <symbol id="i-monitor-x" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4M9.5 7.5l5 5M14.5 7.5l-5 5"/></symbol>
+  <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 13h6M9 17h4"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 22c4 0 7-3 7-7 0-5-5-7-5-12-3 2-4 5-4 7-1-1-2-2-2-4-2 2-3 5-3 9 0 4 3 7 7 7z"/></symbol>
+  <symbol id="i-drive" viewBox="0 0 24 24"><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M5 13 8 4h8l3 9M6 17h.01M10 17h.01"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-windows" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M3 5.6 10.4 4.6v7H3zM11.4 4.4 21 3v8.6h-9.6zM3 12.6h7.4v7L3 18.5zM11.4 12.6H21V21l-9.6-1.4z"/></symbol>
+</svg>
+
+<header class="nav" id="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="ByteFlow home"><img src="assets/icon.png" alt="" width="32" height="32">ByteFlow</a>
+    <nav aria-label="Main">
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#security">Security</a></li>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#faq">FAQ</a></li>
+      </ul>
+    </nav>
+    <div class="nav-actions">
+      <button class="theme-btn" type="button" id="theme-toggle" aria-label="Switch between light and dark theme">
+        <svg class="icon sun" aria-hidden="true"><use href="#i-sun"/></svg>
+        <svg class="icon moon" aria-hidden="true"><use href="#i-moon"/></svg>
+      </button>
+      <a class="btn btn-primary" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span class="label-long">Download</span><span class="sr-only"> ByteFlow</span></a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>Encrypted on your computer, before upload</span>
+      <h1>Your files. Your bucket. <span class="accent">Your keys.</span></h1>
+      <p class="lede">ByteFlow turns your own Cloudflare R2 bucket into a private file vault for Windows. Browse, preview, upload and share your files, and encrypt them with AES-256-GCM before they ever leave your computer.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary btn-lg" href="download/ByteFlow-Setup-0.3.1-windows-x64.exe" download><svg class="icon" aria-hidden="true"><use href="#i-windows"/></svg>Download for Windows</a>
+        <a class="btn btn-ghost btn-lg" href="#how">How it works</a>
+      </div>
+      <p class="hero-meta">Version 0.3.1 · Windows 10 and 11 (64-bit) · 7.5 MB · No account needed</p>
+
+      <div class="shot">
+        <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><em>ByteFlow</em></div>
+        <picture>
+          <source srcset="assets/photos-grid-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+          <img src="assets/photos-grid-light.png" width="1600" height="960" fetchpriority="high" decoding="async"
+               alt="ByteFlow showing a photo folder as a thumbnail grid, with a bucket overview panel listing 43.6 GB used, storage by type and recent uploads.">
+        </picture>
+      </div>
+    </div>
+  </section>
+
+  <section class="facts" aria-label="At a glance">
+    <div class="wrap">
+      <ul>
+        <li class="reveal"><span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg></span><div><strong>Your own R2 bucket</strong><small>Files live in your Cloudflare account, nowhere else.</small></div></li>
+        <li class="reveal"><span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-user-x"/></svg></span><div><strong>No ByteFlow server</strong><small>No sign-up and no middleman. The app talks only to your bucket.</small></div></li>
+        <li class="reveal"><span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span><div><strong>AES-256-GCM</strong><small>Content is encrypted locally, so the bucket only holds ciphertext.</small></div></li>
+        <li class="reveal"><span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></span><div><strong>Argon2id passwords</strong><small>Your bucket keys are sealed under your login password.</small></div></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="kicker">Features</span>
+        <h2>A real file manager for your bucket</h2>
+        <p>Everything you expect from a desktop file browser, built for object storage and fast on large buckets.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text reveal">
+          <h3>Browse it like a drive</h3>
+          <p>Folders, search, sort, list or grid, and a details panel that shows how your space is used. The listing is cached locally, so moving around is instant, even with thousands of objects.</p>
+          <ul class="checks">
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Bucket overview: space by file type, uploads per day, largest folders</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Rename, move and delete files and whole folders</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Built-in viewers for photos, text, CSV, video and audio</span></li>
+          </ul>
+        </div>
+        <div class="shot reveal">
+          <picture>
+            <source srcset="assets/files-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <img src="assets/files-light.png" width="1600" height="960" loading="lazy" decoding="async"
+                 alt="The Files page listing the bucket's folders, with the overview panel showing storage by type and the largest folders.">
+          </picture>
+        </div>
+      </div>
+
+      <div class="feature flip">
+        <div class="feature-text reveal">
+          <h3>Encrypt before upload</h3>
+          <p>Turn on encryption and new uploads are encrypted on your computer with AES-256-GCM. You can also encrypt or decrypt files that are already in the bucket. Encrypted files are marked with a lock everywhere.</p>
+          <ul class="checks">
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Streamed and parallel, so large files stay fast</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Change your key at any time; files are re-encrypted in the background</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>No lock-in: the bundled <code>byteflow-crypto</code> tool decrypts a file with just the passphrase</span></li>
+          </ul>
+        </div>
+        <div class="shot reveal">
+          <picture>
+            <source srcset="assets/file-details-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <img src="assets/file-details-light.png" width="1600" height="960" loading="lazy" decoding="async"
+                 alt="An encrypted PDF selected in ByteFlow. The details panel shows its size, type and location, and marks it encrypted with AES-256-GCM.">
+          </picture>
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text reveal">
+          <h3>Transfers that survive anything</h3>
+          <p>Large uploads go up in parts, several at a time, and pick up where they stopped after a dropped connection, a pause or a restart. Downloads resume too.</p>
+          <ul class="checks">
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Pause, resume and retry each transfer, or all at once</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Choose how many run at the same time</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Drag files onto the window to upload them</span></li>
+          </ul>
+        </div>
+        <div class="shot reveal">
+          <picture>
+            <source srcset="assets/transfers-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <img src="assets/transfers-light.png" width="1600" height="960" loading="lazy" decoding="async"
+                 alt="The Transfers page with paused uploads showing progress, a failed upload with a retry button, and completed transfers.">
+          </picture>
+        </div>
+      </div>
+
+      <div class="feature flip">
+        <div class="feature-text reveal">
+          <h3>Sync folders and share links</h3>
+          <p>Pair a folder on your computer with a folder in the bucket. ByteFlow shows what's new or changed, and uploads only what you approve. When you need to send something, create a link that expires on its own.</p>
+          <ul class="checks">
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>One-way sync that never deletes anything, on either side</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Expiring links signed on your computer, from 15 minutes to seven days</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Copied links are kept out of clipboard history and cleared after a minute</span></li>
+          </ul>
+        </div>
+        <div class="shot reveal">
+          <picture>
+            <source srcset="assets/links-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <img src="assets/links-light.png" width="1600" height="960" loading="lazy" decoding="async"
+                 alt="The Shared links page listing three active links, each with its creation time and how long until it expires.">
+          </picture>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="security">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="kicker">Security</span>
+        <h2>Locked down by default</h2>
+        <p>ByteFlow is built for one person and one bucket, and it assumes your laptop can be lost, borrowed or watched.</p>
+      </div>
+      <div class="grid">
+        <article class="card reveal">
+          <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></span>
+          <h3>Sealed credentials</h3>
+          <p>Your R2 keys are encrypted under a key derived from your login password with Argon2id, then protected by Windows for your user account only.</p>
+        </article>
+        <article class="card reveal">
+          <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span>
+          <h3>Auto-lock</h3>
+          <p>The vault locks after an idle time you choose, from 30 seconds to 10 minutes, and immediately when you lock Windows or the computer goes to sleep.</p>
+        </article>
+        <article class="card reveal">
+          <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-flame"/></svg></span>
+          <h3>Destruction password</h3>
+          <p>A second password that looks like a normal unlock but erases ByteFlow's local data: credentials, keys, caches and thumbnails.</p>
+        </article>
+        <article class="card reveal">
+          <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-monitor-x"/></svg></span>
+          <h3>Hidden from capture</h3>
+          <p>The window is excluded from screenshots, screen recordings, screen sharing and taskbar previews.</p>
+        </article>
+        <article class="card reveal">
+          <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg></span>
+          <h3>Privacy cover</h3>
+          <p>The contents are hidden whenever the window is minimised, and optionally every time it loses focus.</p>
+        </article>
+        <article class="card reveal">
+          <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-drive"/></svg></span>
+          <h3>Stays on this computer</h3>
+          <p>Vault data lives in your local profile and never roams to other machines. Previews are deleted when you close them.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="kicker">How it works</span>
+        <h2>Set up in about five minutes</h2>
+        <p>All you need is a Cloudflare account. R2 has a free tier and no egress fees.</p>
+      </div>
+      <ol class="steps">
+        <li class="reveal">
+          <h3>Create a bucket</h3>
+          <p>In the Cloudflare dashboard, create an R2 bucket and an API token with read and write access to it.</p>
+        </li>
+        <li class="reveal">
+          <h3>Choose two passwords</h3>
+          <p>A login password to unlock ByteFlow, and a destruction password that erases the vault if you're ever forced to open it.</p>
+        </li>
+        <li class="reveal">
+          <h3>Connect and go</h3>
+          <p>Paste your account ID, keys and bucket name, test the connection, and your files appear. Set an encryption key whenever you like.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" id="screens" aria-labelledby="screens-h">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="kicker">A closer look</span>
+        <h2 id="screens-h">Calm, fast, and in light or dark</h2>
+      </div>
+      <div class="gallery">
+        <figure class="reveal">
+          <div class="shot">
+            <picture>
+              <source srcset="assets/encryption-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+              <img src="assets/encryption-light.png" width="1600" height="960" loading="lazy" decoding="async" alt="The Encryption page with the key set and encryption of new uploads turned on.">
+            </picture>
+          </div>
+          <figcaption>Encryption settings</figcaption>
+        </figure>
+        <figure class="reveal">
+          <div class="shot">
+            <picture>
+              <source srcset="assets/sync-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+              <img src="assets/sync-light.png" width="1600" height="960" loading="lazy" decoding="async" alt="The Sync page with two local folders paired to bucket folders.">
+            </picture>
+          </div>
+          <figcaption>Folder sync</figcaption>
+        </figure>
+        <figure class="reveal">
+          <div class="shot">
+            <picture>
+              <source srcset="assets/settings-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+              <img src="assets/settings-light.png" width="1600" height="960" loading="lazy" decoding="async" alt="The Settings page with auto-lock, privacy cover, clipboard clearing and password options.">
+            </picture>
+          </div>
+          <figcaption>Security settings</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="faq">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="kicker">FAQ</span>
+        <h2>Questions, answered</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Does ByteFlow store my files or see my data?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary>
+          <div><p>No. There is no ByteFlow server or account. The app connects directly to your own R2 bucket, and your credentials stay on your computer, encrypted.</p></div>
+        </details>
+        <details>
+          <summary>What does it cost?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary>
+          <div><p>The app is free to download. Storage is billed by Cloudflare to your own account at their R2 rates, and R2 includes a free tier.</p></div>
+        </details>
+        <details>
+          <summary>What exactly is encrypted?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary>
+          <div>
+            <p>With encryption on, the contents of each file are encrypted with AES-256-GCM on your computer before upload, so Cloudflare only ever stores ciphertext.</p>
+            <p>File and folder names, sizes and dates are not encrypted: they stay readable so you can browse the bucket. Keep that in mind when you name sensitive files.</p>
+          </div>
+        </details>
+        <details>
+          <summary>What if I forget my encryption passphrase?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary>
+          <div><p>Encrypted files can't be recovered without it. Nobody, including us, has a copy or a back door. Keep the passphrase in a password manager.</p></div>
+        </details>
+        <details>
+          <summary>Can I get my files back without ByteFlow?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary>
+          <div><p>Yes. Unencrypted files are ordinary objects in your bucket, readable by any S3-compatible tool. Encrypted files can be decrypted with the <code>byteflow-crypto</code> command-line tool and your passphrase, with no vault or account needed.</p></div>
+        </details>
+        <details>
+          <summary>Why does Windows show a SmartScreen warning?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary>
+          <div><p>The installer isn't code-signed yet, so Windows warns about it the first time. Choose "More info", then "Run anyway". You can check the download against its SHA-256 checksum below.</p></div>
+        </details>
+        <details>
+          <summary>Does it need admin rights? What does uninstalling remove?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary>
+          <div><p>No admin rights are needed: ByteFlow installs for your user by default, and offers an all-users install. Uninstalling removes the program but keeps your vault, so a reinstall picks up where you left off. To erase the vault, use Settings → Danger zone.</p></div>
+        </details>
+        <details>
+          <summary>Is there a Mac or Linux version?<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></summary>
+          <div><p>Not yet. ByteFlow currently ships for Windows 10 and 11 (64-bit).</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta" id="download">
+    <div class="wrap">
+      <div class="cta-box reveal">
+        <img src="assets/icon.png" alt="" width="64" height="64" loading="lazy">
+        <h2>Take your files back</h2>
+        <p>Download ByteFlow, connect your R2 bucket, and keep your files encrypted and under your control.</p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary btn-lg" href="download/ByteFlow-Setup-0.3.1-windows-x64.exe" download><svg class="icon" aria-hidden="true"><use href="#i-windows"/></svg>Download ByteFlow 0.3.1</a>
+          <a class="btn btn-ghost btn-lg" href="download/SHA256SUMS.txt">Checksums</a>
+        </div>
+        <p class="dl-meta">Windows 10 and 11, 64-bit · Installer, 7.5 MB · No admin rights needed</p>
+        <details class="checksum">
+          <summary>SHA-256 of the installer</summary>
+          <code>cd240e734c96a6d58d6cde2e15791be1facfe9e48cc774603b55c0c5f3d3bc77</code>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>© 2026 ByteFlow. Cloudflare and R2 are trademarks of Cloudflare, Inc. ByteFlow is not affiliated with Cloudflare.</p>
+    <nav aria-label="Footer">
+      <a href="#features">Features</a>
+      <a href="#security">Security</a>
+      <a href="#faq">FAQ</a>
+      <a href="#download">Download</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="main.js" defer></script>
+</body>
+</html>

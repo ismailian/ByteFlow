@@ -500,6 +500,7 @@ dependencies = [
  "parking_lot",
  "raw-window-handle",
  "rfd",
+ "serde_json",
  "skrifa",
  "tokio",
  "tokio-util",

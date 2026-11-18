@@ -13,7 +13,7 @@ path = "src/main.rs"
 # Developer conveniences for UI work (never enabled by scripts/build.ps1):
 # BYTEFLOW_DEV_DATA_DIR (throwaway vault) and BYTEFLOW_DEV_ALLOW_CAPTURE
 # (screenshots). Off in every shipped build.
-dev-env = []
+dev-env = ["dep:serde_json"]
 
 [dependencies]
 bf-core.workspace = true
@@ -26,6 +26,8 @@ tokio-util.workspace = true
 image.workspace = true
 chrono.workspace = true
 futures.workspace = true
+# dev-env only (demo data seeding).
+serde_json = { workspace = true, optional = true }
 # glow (OpenGL) instead of the default wgpu: far fewer crates, faster builds,
 # smaller binary. No accesskit/system fonts/persistence (nothing is written
 # to disk by the UI toolkit).

@@ -9,6 +9,8 @@
 mod app;
 mod bidi;
 mod ctx;
+#[cfg(feature = "dev-env")]
+mod demo;
 mod platform;
 mod theme;
 mod ui;
@@ -90,6 +92,11 @@ fn main() -> eframe::Result<()> {
             std::process::exit(1);
         }
     };
+
+    #[cfg(feature = "dev-env")]
+    if demo::enabled() {
+        runtime.block_on(demo::seed(&core));
+    }
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

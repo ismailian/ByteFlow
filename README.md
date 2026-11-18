@@ -59,6 +59,7 @@ never enables it, and the window title says `(dev-env)` when it is on:
 | `BYTEFLOW_DEV_DATA_DIR=<dir>` | Use a throwaway vault directory instead of `%LOCALAPPDATA%\ByteFlow` |
 | `BYTEFLOW_DEV_ALLOW_CAPTURE=1` | Don't exclude the window from screen capture (for UI screenshots) |
 | `BYTEFLOW_DEV_VIEW=<local file>` | Open that local file in the viewer after unlock (viewer work without a bucket) |
+| `BYTEFLOW_DEV_DEMO=1` | Seed the (throwaway!) vault with a made-up bucket, thumbnails, transfers, sync pairs and links, and unlock it on start. No network. Extras: `BYTEFLOW_DEV_PAGE`, `_PREFIX`, `_SELECT`, `_THEME`, `_GRID`. `scripts/screenshot.ps1` uses it for the site screenshots in `site/assets/` |
 
 ## Interface (0.3.0)
 
