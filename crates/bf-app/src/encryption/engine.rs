@@ -84,6 +84,9 @@ pub struct EncryptionEngine {
     work_dir: PathBuf,
     preview_dir: PathBuf,
     seq: AtomicU64,
+    /// Runtime captured in `start`: `pump` is also reached from sync UI-thread
+    /// calls (enqueue, retry, remove), where `tokio::spawn` would panic.
+    rt: tokio::runtime::Handle,
 }
 
 impl EncryptionEngine {
@@ -130,6 +133,7 @@ impl EncryptionEngine {
             work_dir,
             preview_dir,
             seq: AtomicU64::new(0),
+            rt: tokio::runtime::Handle::current(),
         });
         *engine.writer.lock() = Some(engine.store.spawn_writer(cancel));
         engine.pump();
@@ -662,7 +666,7 @@ impl EncryptionEngine {
             self.set_status(&t.id, EncStatus::Running, None);
             started += 1;
             let me = self.clone();
-            tokio::spawn(async move {
+            self.rt.spawn(async move {
                 let id = t.id.clone();
                 let inner = me.clone();
                 let task = t.clone();
