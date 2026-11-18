@@ -72,17 +72,17 @@
       <h1>Your files. Your bucket. <span class="accent">Your keys.</span></h1>
       <p class="lede">ByteFlow turns your own Cloudflare R2 bucket into a private file vault for Windows. Browse, preview, upload and share your files, and encrypt them with AES-256-GCM before they ever leave your computer.</p>
       <div class="hero-ctas">
-        <a class="btn btn-primary btn-lg" href="download/ByteFlow-Setup-0.3.2-windows-x64.exe" download><svg class="icon" aria-hidden="true"><use href="#i-windows"/></svg>Download for Windows</a>
+        <a class="btn btn-primary btn-lg" href="download/ByteFlow-Setup-0.4.0-windows-x64.exe" download><svg class="icon" aria-hidden="true"><use href="#i-windows"/></svg>Download for Windows</a>
         <a class="btn btn-ghost btn-lg" href="#how">How it works</a>
       </div>
-      <p class="hero-meta">Version 0.3.2 · Windows 10 and 11 (64-bit) · 7.5 MB · No account needed</p>
+      <p class="hero-meta">Version 0.4.0 · Windows 10 and 11 (64-bit) · 7.6 MB · No account needed</p>
 
       <div class="shot">
         <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><em>ByteFlow</em></div>
         <picture>
           <source srcset="assets/photos-grid-dark.png" media="(prefers-color-scheme: dark)" data-dark>
           <img src="assets/photos-grid-light.png" width="1600" height="960" fetchpriority="high" decoding="async"
-               alt="ByteFlow showing a photo folder as a thumbnail grid, with a bucket overview panel listing 43.6 GB used, storage by type and recent uploads.">
+               alt="ByteFlow showing a photo folder as a thumbnail grid, with a bucket overview panel listing 43.6 GB used, storage by type and uploads this week.">
         </picture>
       </div>
     </div>
@@ -112,16 +112,16 @@
           <h3>Browse it like a drive</h3>
           <p>Folders, search, sort, list or grid, and a details panel that shows how your space is used. The listing is cached locally, so moving around is instant, even with thousands of objects.</p>
           <ul class="checks">
-            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Bucket overview: space by file type, uploads per day, largest folders</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Bucket overview: space by file type and uploads per day</span></li>
             <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Rename, move and delete files and whole folders</span></li>
-            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Built-in viewers for photos, text, CSV, video and audio</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Built-in viewers for photos, text and CSV; video and audio stream straight from the bucket, encrypted or not</span></li>
           </ul>
         </div>
         <div class="shot reveal">
           <picture>
             <source srcset="assets/files-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <img src="assets/files-light.png" width="1600" height="960" loading="lazy" decoding="async"
-                 alt="The Files page listing the bucket's folders, with the overview panel showing storage by type and the largest folders.">
+                 alt="The Files page listing the bucket's folders, with the overview panel showing space used, storage by type and uploads this week.">
           </picture>
         </div>
       </div>
@@ -182,6 +182,25 @@
           </picture>
         </div>
       </div>
+
+      <div class="feature">
+        <div class="feature-text reveal">
+          <h3>All your buckets, one vault</h3>
+          <p>Connect as many R2 buckets as you like. After you unlock, pick one from your buckets and open it. Each bucket keeps its own listing, transfers, sync pairs, links and encryption keys.</p>
+          <ul class="checks">
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>One password unlocks every bucket</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Buckets encrypted from another device keep their own passphrase</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Switch buckets from the sidebar at any time</span></li>
+          </ul>
+        </div>
+        <div class="shot reveal">
+          <picture>
+            <source srcset="assets/buckets-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <img src="assets/buckets-light.png" width="1600" height="960" loading="lazy" decoding="async"
+                 alt="The bucket picker after unlocking: three bucket cards showing space used and file counts, and a card to add another bucket.">
+          </picture>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -190,7 +209,7 @@
       <div class="section-head reveal">
         <span class="kicker">Security</span>
         <h2>Locked down by default</h2>
-        <p>ByteFlow is built for one person and one bucket, and it assumes your laptop can be lost, borrowed or watched.</p>
+        <p>ByteFlow is built for one person and their own buckets, and it assumes your laptop can be lost, borrowed or watched.</p>
       </div>
       <div class="grid">
         <article class="card reveal">
@@ -206,7 +225,7 @@
         <article class="card reveal">
           <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-flame"/></svg></span>
           <h3>Destruction password</h3>
-          <p>A second password that looks like a normal unlock but erases ByteFlow's local data: credentials, keys, caches and thumbnails.</p>
+          <p>Optional. Turn it on in Settings: a second password that looks like a normal unlock but erases ByteFlow's local data, including credentials, keys, caches and thumbnails.</p>
         </article>
         <article class="card reveal">
           <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-monitor-x"/></svg></span>
@@ -221,7 +240,7 @@
         <article class="card reveal">
           <span class="badge"><svg class="icon" aria-hidden="true"><use href="#i-drive"/></svg></span>
           <h3>Stays on this computer</h3>
-          <p>Vault data lives in your local profile and never roams to other machines. Previews are deleted when you close them.</p>
+          <p>Vault data lives in your local profile and never roams to other machines. Video and audio stream into memory, never to disk.</p>
         </article>
       </div>
     </div>
@@ -240,8 +259,8 @@
           <p>In the Cloudflare dashboard, create an R2 bucket and an API token with read and write access to it.</p>
         </li>
         <li class="reveal">
-          <h3>Choose two passwords</h3>
-          <p>A login password to unlock ByteFlow, and a destruction password that erases the vault if you're ever forced to open it.</p>
+          <h3>Choose a password</h3>
+          <p>One login password unlocks ByteFlow. Later, you can add a destruction password that erases the vault if you're ever forced to open it.</p>
         </li>
         <li class="reveal">
           <h3>Connect and go</h3>
@@ -280,7 +299,7 @@
           <div class="shot">
             <picture>
               <source srcset="assets/settings-dark.png" media="(prefers-color-scheme: dark)" data-dark>
-              <img src="assets/settings-light.png" width="1600" height="960" loading="lazy" decoding="async" alt="The Settings page with auto-lock, privacy cover, clipboard clearing and password options.">
+              <img src="assets/settings-light.png" width="1600" height="960" loading="lazy" decoding="async" alt="The Settings page with auto-lock, privacy cover, clipboard clearing, the login password and the optional destruction password.">
             </picture>
           </div>
           <figcaption>Security settings</figcaption>
@@ -342,13 +361,13 @@
         <h2>Take your files back</h2>
         <p>Download ByteFlow, connect your R2 bucket, and keep your files encrypted and under your control.</p>
         <div class="hero-ctas">
-          <a class="btn btn-primary btn-lg" href="download/ByteFlow-Setup-0.3.2-windows-x64.exe" download><svg class="icon" aria-hidden="true"><use href="#i-windows"/></svg>Download ByteFlow 0.3.2</a>
+          <a class="btn btn-primary btn-lg" href="download/ByteFlow-Setup-0.4.0-windows-x64.exe" download><svg class="icon" aria-hidden="true"><use href="#i-windows"/></svg>Download ByteFlow 0.4.0</a>
           <a class="btn btn-ghost btn-lg" href="download/SHA256SUMS.txt">Checksums</a>
         </div>
         <p class="dl-meta">Windows 10 and 11, 64-bit · Installer, 7.5 MB · No admin rights needed</p>
         <details class="checksum">
           <summary>SHA-256 of the installer</summary>
-          <code>b67cc8f1937962b4852ec492fe0c876122fee2ef6b7d9868b9bbf8da111301da</code>
+          <code>45bd2be037f70ea9deebe43a3c27e24ab849761ff6057f97d3b3a091e8376638</code>
         </details>
       </div>
     </div>
