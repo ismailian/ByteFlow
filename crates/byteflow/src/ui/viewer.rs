@@ -3,9 +3,13 @@
 //!
 //! * Photos and text: plaintext objects stream from R2 into memory (no disk
 //!   cache, no temp file); a decoded photo also seeds the thumbnail.
-//! * Video and audio play in-app through the OS media stack
-//!   (`platform::media`, Media Foundation on Windows) from a private temp
-//!   copy that is deleted when the viewer closes (and on next launch / wipe).
+//! * Video and audio **stream** in-app through the OS media stack
+//!   (`platform::media`, Media Foundation on Windows): the player pulls
+//!   ranged reads from the bucket (`bf_app::stream`), decrypting encrypted
+//!   objects segment by segment in memory, so playback starts after the first
+//!   blocks arrive and nothing is written to disk. Only "Open in default app"
+//!   (or a platform without built-in playback) makes a private temp copy,
+//!   deleted when the viewer closes (and on next launch / wipe).
 //! * Encrypted objects go through `decrypt_to_temp` (header-first key
 //!   resolution, passphrase retry); for photos/text the plaintext temp is
 //!   deleted as soon as it is in memory.
@@ -25,13 +29,14 @@ use eframe::egui::{self, Align2, Color32, ColorImage, CornerRadius, RichText, Se
 use tokio::io::AsyncWriteExt;
 
 use bf_app::session::Session;
+use bf_app::stream::MediaStream;
 use bf_core::media::{MediaKind, media_kind_for_key};
 use bf_core::{AppFailure, AppResult};
 
 use crate::bidi;
 use crate::ctx::{AppCtx, Task};
 use crate::platform;
-use crate::platform::media::MediaPlayer;
+use crate::platform::media::{ByteSource, MediaPlayer, Source};
 use crate::theme::{self, pal};
 use crate::ui::icons;
 use crate::ui::widgets::{self, Kind, Tone};
@@ -48,8 +53,29 @@ const CSV_MAX_COLS: usize = 64;
 enum Loaded {
     Image(ColorImage, Arc<image::DynamicImage>),
     Text(String, bool),
-    Media(PathBuf),
+    Stream(Arc<MediaStream>),
     External(PathBuf),
+}
+
+/// A bucket object as the player's byte source.
+pub struct StreamSource(pub Arc<MediaStream>);
+
+impl ByteSource for StreamSource {
+    fn len(&self) -> u64 {
+        self.0.len()
+    }
+    fn read_at(&self, off: u64, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read_at(off, buf).map_err(|e| std::io::Error::other(e.developer_message()))
+    }
+    fn cancel(&self) {
+        self.0.cancel();
+    }
+}
+
+/// Open a streamed player for `stream` (Windows; `None` elsewhere).
+pub fn stream_player(stream: Arc<MediaStream>, key: &str, repaint: egui::Context) -> Option<MediaPlayer> {
+    let name = sanitize(bf_core::media::leaf_name(key));
+    MediaPlayer::open_source(Source::Stream { source: Arc::new(StreamSource(stream)), name }, repaint, true)
 }
 
 pub fn decode_text(b: &[u8]) -> String {
@@ -168,10 +194,8 @@ async fn load(session: Arc<Session>, key: String, encrypted: bool, temp_dir: Pat
             let (ci, img) = bf_app::blocking(move || decode_image(&buf, IMAGE_MAX_EDGE)).await?;
             Ok(Loaded::Image(ci, img))
         }
-        (MediaKind::Video | MediaKind::Audio, _) => {
-            let p = to_temp.await?;
-            Ok(if MediaPlayer::supported() { Loaded::Media(p) } else { Loaded::External(p) })
-        }
+        (MediaKind::Video | MediaKind::Audio, _) if MediaPlayer::supported() => Ok(Loaded::Stream(MediaStream::open(&session, &key).await?)),
+        (MediaKind::Video | MediaKind::Audio, _) => Ok(Loaded::External(to_temp.await?)),
         (MediaKind::None, _) => Ok(Loaded::External(to_temp.await?)),
     }
 }
@@ -371,20 +395,14 @@ impl Viewer {
                 State::Image(egui_ctx.load_texture(format!("viewer:{}", self.key), ci, TextureOptions::LINEAR))
             }
             Ok(Loaded::Text(s, t)) => State::Text(text_doc(egui_ctx, &self.key, s, t)),
-            Ok(Loaded::Media(p)) => {
-                self.temp = Some(p.clone());
-                match MediaPlayer::open(&p, egui_ctx.clone()) {
-                    Some(pl) => {
-                        pl.set_volume(self.volume as f64);
-                        self.player = Some(pl);
-                        State::Media
-                    }
-                    None => {
-                        platform::open_with_default_app(&p);
-                        State::External(p)
-                    }
+            Ok(Loaded::Stream(s)) => match stream_player(s, &self.key, egui_ctx.clone()) {
+                Some(pl) => {
+                    pl.set_volume(self.volume as f64);
+                    self.player = Some(pl);
+                    State::Media
                 }
-            }
+                None => State::Error("This file couldn't be played.".into()),
+            },
             Ok(Loaded::External(p)) => {
                 self.temp = Some(p.clone());
                 if !platform::open_with_default_app(&p) {
@@ -541,8 +559,11 @@ impl Viewer {
         match &mut self.state {
             State::Loading(_, ext) => {
                 let done = self.bytes.load(Ordering::Relaxed);
+                let streams = matches!(self.kind, MediaKind::Video | MediaKind::Audio) && MediaPlayer::supported();
                 let label = if *ext {
                     "Preparing a private copy…"
+                } else if streams {
+                    "Connecting…"
                 } else if self.encrypted {
                     "Downloading and decrypting…"
                 } else {
@@ -851,7 +872,10 @@ impl Viewer {
                 if click.clicked() {
                     toggle(pl, &st);
                 }
-                if st.paused && !st.ended && st.ready {
+                if st.buffering && !st.paused {
+                    buffering_badge(ui, r.center());
+                    egui_ctx.request_repaint_after(Duration::from_millis(100));
+                } else if st.paused && !st.ended && st.ready {
                     ui.painter().circle_filled(r.center(), 34.0, Color32::from_black_alpha(150));
                     ui.painter().text(r.center() + vec2(2.0, 0.0), Align2::CENTER_CENTER, icons::PLAY, theme::regular(30.0), Color32::WHITE);
                 }
@@ -868,8 +892,8 @@ impl Viewer {
                 ui.add_space(16.0);
                 bidi::wrapped(ui, bf_core::media::leaf_name(&self.key), theme::semibold(17.0), p.text);
                 ui.add_space(2.0);
-                let state = if !st.ready {
-                    "Loading…"
+                let state = if !st.ready || (st.buffering && !st.paused) {
+                    "Buffering…"
                 } else if st.ended {
                     "Finished"
                 } else if st.paused {
@@ -967,7 +991,17 @@ fn centered(ui: &mut egui::Ui, rect: egui::Rect, width: f32, add: impl FnOnce(&m
     add(&mut child);
 }
 
-fn play_button(ui: &mut egui::Ui, icon: &str, tip: &str, enabled: bool) -> egui::Response {
+/// A dark pill with a spinner, over the video while it waits for data.
+fn buffering_badge(ui: &mut egui::Ui, center: egui::Pos2) {
+    let r = egui::Rect::from_center_size(center, vec2(132.0, 40.0));
+    ui.painter().rect_filled(r, CornerRadius::same(20), Color32::from_black_alpha(160));
+    let mut s = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_center_size(r.left_center() + vec2(24.0, 0.0), vec2(18.0, 18.0))));
+    s.visuals_mut().widgets.inactive.fg_stroke.color = Color32::WHITE;
+    s.add(egui::Spinner::new().size(16.0).color(Color32::WHITE));
+    ui.painter().text(r.left_center() + vec2(42.0, 0.0), Align2::LEFT_CENTER, "Buffering…", theme::medium(13.0), Color32::WHITE);
+}
+
+pub(crate) fn play_button(ui: &mut egui::Ui, icon: &str, tip: &str, enabled: bool) -> egui::Response {
     let p = *pal(ui);
     let (rect, resp) = ui.allocate_exact_size(vec2(42.0, 42.0), if enabled { Sense::click() } else { Sense::hover() });
     let fill = if !enabled {
@@ -987,7 +1021,7 @@ fn play_button(ui: &mut egui::Ui, icon: &str, tip: &str, enabled: bool) -> egui:
 }
 
 /// A thin track slider (0..=1) used for seeking and volume.
-fn slider(ui: &mut egui::Ui, value: &mut f32, width: f32, enabled: bool, color: Color32) -> egui::Response {
+pub(crate) fn slider(ui: &mut egui::Ui, value: &mut f32, width: f32, enabled: bool, color: Color32) -> egui::Response {
     let p = *pal(ui);
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 24.0), if enabled { Sense::click_and_drag() } else { Sense::hover() });
     if enabled

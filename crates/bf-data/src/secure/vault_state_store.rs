@@ -42,6 +42,19 @@ impl VaultStateStore {
         self.store.write(keys::DESTRUCTION_HASH, &hash)
     }
 
+    /// Whether a destruction password is configured. Optional since 0.4.0:
+    /// installs that set one keep it; fresh installs start without one.
+    pub fn has_destruction_password(&self) -> AppResult<bool> {
+        Ok(self.store.contains(keys::DESTRUCTION_HASH)? && self.store.contains(keys::DESTRUCTION_SALT)?)
+    }
+
+    /// Turn the destruction password off (hash first, so a half-done delete
+    /// can never leave a hash without its salt being checked against).
+    pub fn clear_destruction_password(&self) -> AppResult<()> {
+        self.store.delete(keys::DESTRUCTION_HASH)?;
+        self.store.delete(keys::DESTRUCTION_SALT)
+    }
+
     /// Constant-time check. Always runs Argon2id (even with no hash stored) so
     /// timing is comparable with the login path (§3.4).
     pub fn is_destruction_password(&self, password: &[u8]) -> AppResult<bool> {
@@ -97,9 +110,14 @@ mod tests {
     fn destruction_password() {
         let v = VaultStateStore::new(Arc::new(MemorySecureStore::default())).with_kdf(Argon2Params::test_weak());
         assert!(!v.is_destruction_password(b"x").unwrap());
+        assert!(!v.has_destruction_password().unwrap());
         v.set_destruction_password(b"destroy-me-now").unwrap();
+        assert!(v.has_destruction_password().unwrap());
         assert!(v.is_destruction_password(b"destroy-me-now").unwrap());
         assert!(!v.is_destruction_password(b"destroy-me-not").unwrap());
+        v.clear_destruction_password().unwrap();
+        assert!(!v.has_destruction_password().unwrap());
+        assert!(!v.is_destruction_password(b"destroy-me-now").unwrap());
         v.set_pref("auto_lock_seconds", Some("60")).unwrap();
         assert_eq!(v.pref("auto_lock_seconds").as_deref(), Some("60"));
     }

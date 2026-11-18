@@ -5,13 +5,19 @@
 //! and a D3D11 device; each new video frame is scaled on the GPU to the size
 //! it is shown at (`TransferVideoFrame`), read back, and handed to the UI as
 //! an egui texture. Audio goes to the default output device through the
-//! engine. The file is opened read-only from the app's private temp folder;
-//! nothing is handed to another process.
+//! engine. Nothing is handed to another process.
+//!
+//! Sources ([`Source`]): a local file (opened read-only), or — the normal
+//! case since 0.4.0 — a [`ByteSource`] streamed from the bucket. The engine
+//! reads a stream through an in-process `IMFByteStream` ([`imp::RemoteStream`])
+//! whose reads run on a dedicated thread, so the engine only ever pulls the
+//! ranges it needs (the index first, then playback, then wherever the user
+//! seeks) instead of waiting for the whole object.
 //!
 //! Other platforms: [`MediaPlayer::open`] returns `None` and the viewer falls
 //! back to opening the file in the default app.
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -29,6 +35,24 @@ pub fn video_playing() -> bool {
     VIDEO_PLAYING.load(Ordering::Relaxed)
 }
 
+/// Random-access bytes for the player (a bucket object, streamed).
+pub trait ByteSource: Send + Sync {
+    fn len(&self) -> u64;
+    /// Blocking read at `off`; short only at the end. Called on the player's
+    /// own I/O thread, never the UI thread.
+    fn read_at(&self, off: u64, buf: &mut [u8]) -> std::io::Result<usize>;
+    /// Make pending and future reads fail fast (the player is closing).
+    fn cancel(&self);
+}
+
+pub enum Source {
+    /// A local file (dev-env viewer and tests; the app streams).
+    #[cfg_attr(not(any(test, feature = "dev-env")), allow(dead_code))]
+    File(PathBuf),
+    /// `name` carries the extension the OS uses to pick a demuxer.
+    Stream { source: Arc<dyn ByteSource>, name: String },
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Status {
     /// Metadata loaded (duration, streams and size are known).
@@ -42,6 +66,8 @@ pub struct Status {
     pub paused: bool,
     pub ended: bool,
     pub seeking: bool,
+    /// Waiting for data (start-up, after a seek, or a slow connection).
+    pub buffering: bool,
     /// Static copy; never raw system text.
     pub error: Option<String>,
 }
@@ -67,6 +93,7 @@ pub struct MediaPlayer {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
     viewport: (u32, u32),
+    stream: Option<Arc<dyn ByteSource>>,
 }
 
 impl MediaPlayer {
@@ -74,20 +101,30 @@ impl MediaPlayer {
         cfg!(windows)
     }
 
-    /// Start playing `path`. `None` where built-in playback isn't available.
+    /// Start playing a local file. `None` where built-in playback isn't available.
+    #[cfg(any(test, feature = "dev-env"))]
+    pub fn open(path: &std::path::Path, repaint: egui::Context) -> Option<Self> {
+        Self::open_source(Source::File(path.to_path_buf()), repaint, true)
+    }
+
+    /// Start playing `source`; with `autoplay` false it loads paused.
     #[allow(unused_variables)]
-    pub fn open(path: &Path, repaint: egui::Context) -> Option<Self> {
+    pub fn open_source(source: Source, repaint: egui::Context, autoplay: bool) -> Option<Self> {
         #[cfg(windows)]
         {
             let shared = Arc::new(Shared {
-                status: Mutex::new(Status { duration: f64::NAN, paused: true, ..Default::default() }),
+                status: Mutex::new(Status { duration: f64::NAN, paused: true, buffering: true, ..Default::default() }),
                 frame: Mutex::new(None),
                 repaint,
             });
+            let stream = match &source {
+                Source::Stream { source, .. } => Some(source.clone()),
+                Source::File(_) => None,
+            };
             let (tx, rx) = mpsc::channel();
-            let (s2, p2) = (shared.clone(), path.to_path_buf());
-            let thread = std::thread::Builder::new().name("byteflow-media".into()).spawn(move || imp::run(&p2, rx, &s2)).ok()?;
-            Some(Self { tx, shared, thread: Some(thread), viewport: (0, 0) })
+            let s2 = shared.clone();
+            let thread = std::thread::Builder::new().name("byteflow-media".into()).spawn(move || imp::run(source, autoplay, rx, &s2)).ok()?;
+            Some(Self { tx, shared, thread: Some(thread), viewport: (0, 0), stream })
         }
         #[cfg(not(windows))]
         {
@@ -134,6 +171,10 @@ impl MediaPlayer {
 
 impl Drop for MediaPlayer {
     fn drop(&mut self) {
+        // Unblock any read in flight first so the engine shuts down promptly.
+        if let Some(s) = &self.stream {
+            s.cancel();
+        }
         let _ = self.tx.send(Cmd::Stop);
         // Join so the file handle is closed before the temp copy is deleted.
         if let Some(t) = self.thread.take() {
@@ -145,11 +186,14 @@ impl Drop for MediaPlayer {
 
 #[cfg(windows)]
 mod imp {
+    use std::collections::HashMap;
     use std::os::windows::ffi::OsStrExt;
-    use std::path::Path;
+    use std::sync::Arc;
     use std::sync::atomic::Ordering;
-    use std::sync::mpsc::{Receiver, RecvTimeoutError};
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
     use std::time::Duration;
+
+    use parking_lot::Mutex;
 
     use eframe::egui::{self, Color32};
     use windows::Win32::Foundation::{HMODULE, RECT};
@@ -163,10 +207,150 @@ mod imp {
     use windows::Win32::Media::MediaFoundation::*;
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize};
     use windows::Win32::System::Power::{ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED, SetThreadExecutionState};
-    use windows::core::{BSTR, Interface, PCWSTR};
-    use windows_core::implement;
+    use windows::Win32::Foundation::{E_FAIL, E_INVALIDARG, E_NOTIMPL, S_OK};
+    use windows::core::{BSTR, IUnknown, Interface, PCWSTR};
+    use windows_core::{BOOL, Ref, implement};
 
-    use super::{Cmd, Shared, VIDEO_PLAYING};
+    use super::{ByteSource, Cmd, Shared, Source, VIDEO_PLAYING};
+
+    // ------------------------------------------------- streamed byte stream --
+
+    /// Raw COM pointers moved to the I/O thread. The async result is
+    /// free-threaded, and the destination buffer stays valid until `EndRead`
+    /// (the `IMFByteStream` contract).
+    struct Job {
+        buf: usize,
+        len: u32,
+        result: IMFAsyncResult,
+    }
+    // SAFETY: see above; MF async results may be completed from any thread.
+    unsafe impl Send for Job {}
+
+    struct Inner {
+        source: Arc<dyn ByteSource>,
+        pos: Mutex<u64>,
+        /// Bytes read per finished async result (keyed by its pointer).
+        done: Mutex<HashMap<usize, u32>>,
+    }
+
+    impl Inner {
+        fn read(&self, buf: &mut [u8]) -> windows::core::Result<u32> {
+            let at = *self.pos.lock();
+            let n = self.source.read_at(at, buf).map_err(|_| windows::core::Error::from(E_FAIL))?;
+            *self.pos.lock() = at + n as u64;
+            Ok(n as u32)
+        }
+    }
+
+    /// `IMFByteStream` over a [`ByteSource`]: readable, seekable, read-only.
+    /// Async reads are queued to one I/O thread, in order.
+    #[implement(IMFByteStream)]
+    pub(super) struct RemoteStream {
+        inner: Arc<Inner>,
+        jobs: Mutex<Option<mpsc::Sender<Job>>>,
+    }
+
+    impl RemoteStream {
+        pub(super) fn create(source: Arc<dyn ByteSource>) -> Option<IMFByteStream> {
+            let inner = Arc::new(Inner { source, pos: Mutex::new(0), done: Mutex::new(HashMap::new()) });
+            let (tx, rx) = mpsc::channel::<Job>();
+            let i2 = inner.clone();
+            std::thread::Builder::new()
+                .name("byteflow-media-io".into())
+                .spawn(move || {
+                    while let Ok(job) = rx.recv() {
+                        // SAFETY: the caller keeps `buf` valid until EndRead.
+                        let buf = unsafe { std::slice::from_raw_parts_mut(job.buf as *mut u8, job.len as usize) };
+                        let status = match i2.read(buf) {
+                            Ok(n) => {
+                                i2.done.lock().insert(job.result.as_raw() as usize, n);
+                                S_OK
+                            }
+                            Err(e) => e.code(),
+                        };
+                        unsafe {
+                            let _ = job.result.SetStatus(status);
+                            let _ = MFInvokeCallback(&job.result);
+                        }
+                    }
+                })
+                .ok()?;
+            Some(Self { inner, jobs: Mutex::new(Some(tx)) }.into())
+        }
+    }
+
+    #[allow(non_snake_case)]
+    impl IMFByteStream_Impl for RemoteStream_Impl {
+        fn GetCapabilities(&self) -> windows::core::Result<u32> {
+            Ok(MFBYTESTREAM_IS_READABLE | MFBYTESTREAM_IS_SEEKABLE)
+        }
+        fn GetLength(&self) -> windows::core::Result<u64> {
+            Ok(self.inner.source.len())
+        }
+        fn SetLength(&self, _len: u64) -> windows::core::Result<()> {
+            Err(E_NOTIMPL.into())
+        }
+        fn GetCurrentPosition(&self) -> windows::core::Result<u64> {
+            Ok(*self.inner.pos.lock())
+        }
+        fn SetCurrentPosition(&self, pos: u64) -> windows::core::Result<()> {
+            if pos > self.inner.source.len() {
+                return Err(E_INVALIDARG.into());
+            }
+            *self.inner.pos.lock() = pos;
+            Ok(())
+        }
+        fn IsEndOfStream(&self) -> windows::core::Result<BOOL> {
+            Ok((*self.inner.pos.lock() >= self.inner.source.len()).into())
+        }
+        fn Read(&self, pb: *mut u8, cb: u32, pcbread: *mut u32) -> windows::core::Result<()> {
+            if pb.is_null() || pcbread.is_null() {
+                return Err(E_INVALIDARG.into());
+            }
+            // SAFETY: MF passes a writable buffer of `cb` bytes.
+            let n = self.inner.read(unsafe { std::slice::from_raw_parts_mut(pb, cb as usize) })?;
+            unsafe { *pcbread = n };
+            Ok(())
+        }
+        fn BeginRead(&self, pb: *mut u8, cb: u32, pcallback: Ref<IMFAsyncCallback>, punkstate: Ref<IUnknown>) -> windows::core::Result<()> {
+            if pb.is_null() {
+                return Err(E_INVALIDARG.into());
+            }
+            let result = unsafe { MFCreateAsyncResult(None, pcallback.as_ref(), punkstate.as_ref())? };
+            let tx = self.jobs.lock().clone().ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+            tx.send(Job { buf: pb as usize, len: cb, result }).map_err(|_| windows::core::Error::from(E_FAIL))
+        }
+        fn EndRead(&self, presult: Ref<IMFAsyncResult>) -> windows::core::Result<u32> {
+            let r = presult.ok()?;
+            let n = self.inner.done.lock().remove(&(r.as_raw() as usize));
+            unsafe { r.GetStatus()? };
+            n.ok_or_else(|| E_FAIL.into())
+        }
+        fn Write(&self, _pb: *const u8, _cb: u32) -> windows::core::Result<u32> {
+            Err(E_NOTIMPL.into())
+        }
+        fn BeginWrite(&self, _pb: *const u8, _cb: u32, _c: Ref<IMFAsyncCallback>, _s: Ref<IUnknown>) -> windows::core::Result<()> {
+            Err(E_NOTIMPL.into())
+        }
+        fn EndWrite(&self, _r: Ref<IMFAsyncResult>) -> windows::core::Result<u32> {
+            Err(E_NOTIMPL.into())
+        }
+        fn Seek(&self, origin: MFBYTESTREAM_SEEK_ORIGIN, offset: i64, _flags: u32) -> windows::core::Result<u64> {
+            let mut pos = self.inner.pos.lock();
+            let base = if origin == msoCurrent { *pos as i64 } else { 0 };
+            let new = base.checked_add(offset).filter(|n| *n >= 0).ok_or_else(|| windows::core::Error::from(E_INVALIDARG))? as u64;
+            *pos = new.min(self.inner.source.len());
+            Ok(*pos)
+        }
+        fn Flush(&self) -> windows::core::Result<()> {
+            Ok(())
+        }
+        fn Close(&self) -> windows::core::Result<()> {
+            // Ends the I/O thread once queued reads drain.
+            self.jobs.lock().take();
+            Ok(())
+        }
+    }
 
     /// Largest frame ever read back (GPU-scaled down to this).
     const MAX_W: u32 = 2560;
@@ -189,13 +373,13 @@ mod imp {
         }
     }
 
-    pub(super) fn run(path: &Path, rx: Receiver<Cmd>, shared: &std::sync::Arc<Shared>) {
+    pub(super) fn run(source: Source, autoplay: bool, rx: Receiver<Cmd>, shared: &std::sync::Arc<Shared>) {
         // SAFETY: COM/MF init and teardown are balanced on this thread.
         unsafe {
             let com = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
             let mf = MFStartup(MF_VERSION, MFSTARTUP_FULL).is_ok();
             if mf {
-                if let Err(msg) = session(path, &rx, shared) {
+                if let Err(msg) = session(source, autoplay, &rx, shared) {
                     shared.status.lock().error = Some(msg.into());
                     shared.repaint.request_repaint();
                     // Keep the thread (and so the player) alive until closed.
@@ -283,7 +467,7 @@ mod imp {
         }
     }
 
-    unsafe fn session(path: &Path, rx: &Receiver<Cmd>, shared: &std::sync::Arc<Shared>) -> Result<(), &'static str> {
+    unsafe fn session(source: Source, autoplay: bool, rx: &Receiver<Cmd>, shared: &std::sync::Arc<Shared>) -> Result<(), &'static str> {
         const FAIL: &str = "Media playback couldn't start on this computer.";
         unsafe {
             let (dev, ctx) = device(D3D_DRIVER_TYPE_HARDWARE).or_else(|_| device(D3D_DRIVER_TYPE_WARP)).map_err(|_| FAIL)?;
@@ -307,14 +491,28 @@ mod imp {
             let factory: IMFMediaEngineClassFactory = CoCreateInstance(&CLSID_MFMediaEngineClassFactory, None, CLSCTX_INPROC_SERVER).map_err(|_| FAIL)?;
             let engine = factory.CreateInstance(0, &attrs).map_err(|_| FAIL)?;
 
-            let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-            let opened = MFCreateFile(MF_ACCESSMODE_READ, MF_OPENMODE_FAIL_IF_NOT_EXIST, MF_FILEFLAGS_NONE, PCWSTR(wide.as_ptr()))
-                .and_then(|stream| engine.cast::<IMFMediaEngineEx>().map(|ex| (ex, stream)))
-                .and_then(|(ex, stream)| ex.SetSourceFromByteStream(&stream, &BSTR::from_wide(&wide[..wide.len() - 1])));
-            if opened.is_err() {
-                engine.SetSource(&BSTR::from_wide(&wide[..wide.len() - 1])).map_err(|_| "This file couldn't be opened for playback.")?;
+            match source {
+                Source::File(path) => {
+                    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+                    let opened = MFCreateFile(MF_ACCESSMODE_READ, MF_OPENMODE_FAIL_IF_NOT_EXIST, MF_FILEFLAGS_NONE, PCWSTR(wide.as_ptr()))
+                        .and_then(|stream| engine.cast::<IMFMediaEngineEx>().map(|ex| (ex, stream)))
+                        .and_then(|(ex, stream)| ex.SetSourceFromByteStream(&stream, &BSTR::from_wide(&wide[..wide.len() - 1])));
+                    if opened.is_err() {
+                        engine.SetSource(&BSTR::from_wide(&wide[..wide.len() - 1])).map_err(|_| "This file couldn't be opened for playback.")?;
+                    }
+                }
+                Source::Stream { source, name } => {
+                    const OPEN: &str = "This file couldn't be opened for playback.";
+                    let stream = RemoteStream::create(source).ok_or(FAIL)?;
+                    let ex = engine.cast::<IMFMediaEngineEx>().map_err(|_| FAIL)?;
+                    // The "URL" only names the stream: its extension picks the demuxer.
+                    let url: String = name.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect();
+                    ex.SetSourceFromByteStream(&stream, &BSTR::from(format!("byteflow-stream/{url}"))).map_err(|_| OPEN)?;
+                }
             }
-            let _ = engine.Play();
+            if autoplay {
+                let _ = engine.Play();
+            }
 
             let result = pump(&engine, &dev, &ctx, rx, shared);
             let _ = engine.Shutdown();
@@ -375,6 +573,8 @@ mod imp {
                 )
             };
             let error = unsafe { engine.GetError().ok().map(|e| e.GetErrorCode()).filter(|c| *c != 0) };
+            let ready = unsafe { engine.GetReadyState() };
+            let buffering = error.is_none() && !ended && (seeking || ready < MF_MEDIA_ENGINE_READY_HAVE_FUTURE_DATA.0 as u16);
             let mut native = (0u32, 0u32);
             if has_video {
                 unsafe {
@@ -383,7 +583,12 @@ mod imp {
             }
             {
                 let mut s = shared.status.lock();
-                let changed = s.paused != paused || s.ended != ended || s.has_video != has_video || (position - last_pos).abs() > 0.2;
+                let changed = s.paused != paused
+                    || s.ended != ended
+                    || s.has_video != has_video
+                    || s.buffering != buffering
+                    || (position - last_pos).abs() > 0.2;
+                s.buffering = buffering;
                 s.has_video = has_video;
                 s.has_audio = has_audio;
                 s.paused = paused;
@@ -509,5 +714,117 @@ mod tests {
         assert!(!super::video_playing());
         // The file handle is closed once the player is dropped.
         std::fs::OpenOptions::new().write(true).open(&path).expect("file still locked after drop");
+    }
+
+    /// A network-like source: 40 ms per request, 8 MB/s.
+    struct Throttled(bf_app::stream::MemoryFetch);
+    impl bf_app::stream::RangeFetch for Throttled {
+        fn fetch(&self, start: u64, len: u64) -> futures::future::BoxFuture<'_, bf_core::AppResult<bf_app::stream::Bytes>> {
+            let inner = self.0.fetch(start, len);
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_millis(40) + Duration::from_secs_f64(len as f64 / 8e6)).await;
+                inner.await
+            })
+        }
+    }
+
+    /// Stream `path` through the in-process byte stream, as the app streams
+    /// a bucket object: encrypted with the vault format and served from
+    /// memory in ranged reads, decrypted per segment.
+    fn streamed(path: &str, encrypted: bool) -> (MediaPlayer, std::sync::Arc<bf_app::stream::MediaStream>, tokio::runtime::Runtime) {
+        use bf_core::crypto::file_crypto::{DEFAULT_CHUNK_SIZE, encrypt_file, no_control};
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let key = bf_core::crypto::secure_bytes::random_bytes(32);
+        let bytes = if encrypted {
+            let d = std::env::temp_dir().join(format!("bf-media-test-{}", std::process::id()));
+            encrypt_file(Path::new(path), &d, &key, DEFAULT_CHUNK_SIZE, None, &mut no_control()).unwrap();
+            let b = std::fs::read(&d).unwrap();
+            let _ = std::fs::remove_file(&d);
+            b
+        } else {
+            std::fs::read(path).unwrap()
+        };
+        let len = bytes.len() as u64;
+        let fetch = std::sync::Arc::new(Throttled(bf_app::stream::MemoryFetch(bytes)));
+        let master = encrypted.then_some(&key[..]);
+        let s = rt.block_on(bf_app::stream::MediaStream::new(fetch, len, master, tokio_util::sync::CancellationToken::new())).unwrap();
+        let name = Path::new(path).file_name().unwrap().to_string_lossy().into_owned();
+        let src = super::Source::Stream { source: std::sync::Arc::new(crate::ui::viewer::StreamSource(s.clone())), name };
+        let pl = MediaPlayer::open_source(src, eframe::egui::Context::default(), true).expect("player");
+        (pl, s, rt)
+    }
+
+    /// `BYTEFLOW_TEST_MEDIA=<video.mp4> cargo test --release -p byteflow -- --ignored streamed`
+    #[test]
+    #[ignore = "needs BYTEFLOW_TEST_MEDIA pointing at a video with audio"]
+    fn streamed_encrypted_video_plays_and_seeks() {
+        let path = std::env::var("BYTEFLOW_TEST_MEDIA").expect("BYTEFLOW_TEST_MEDIA");
+        let size = std::fs::metadata(&path).unwrap().len();
+        let (mut pl, stream, _rt) = streamed(&path, true);
+        pl.set_viewport(640, 360);
+        pl.set_muted(true);
+        let start = Instant::now();
+        let mut frames = 0;
+        let mut first_frame = None;
+        while start.elapsed() < Duration::from_secs(15) && frames < 30 {
+            if pl.take_frame().is_some() {
+                frames += 1;
+                first_frame.get_or_insert(start.elapsed());
+            }
+            assert!(pl.status().error.is_none(), "{:?}", pl.status().error);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let st = pl.status();
+        assert!(st.ready && st.has_video && st.has_audio, "{st:?}");
+        assert!(frames >= 30, "only {frames} frames");
+        let fetched_at_start = stream.fetched();
+        let first = first_frame.unwrap();
+        eprintln!("first frame after {first:?}; fetched {fetched_at_start} of {size} bytes");
+        // Streaming: the picture starts well before the whole object could
+        // have arrived at 8 MB/s.
+        let full = Duration::from_secs_f64(size as f64 / 8e6);
+        assert!(first < full / 2, "first frame {first:?} vs full download {full:?}");
+
+        // Seek near the end: playback resumes there without reading it all.
+        pl.seek(st.duration - 2.5);
+        std::thread::sleep(Duration::from_millis(1500));
+        let p = pl.status().position;
+        assert!((p - (st.duration - 2.5)).abs() < 1.5, "position after seek {p}");
+        let before = frames;
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(5) && frames < before + 10 {
+            if pl.take_frame().is_some() {
+                frames += 1;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(frames >= before + 10, "no frames after the seek");
+        let t = Instant::now();
+        drop(pl);
+        assert!(t.elapsed() < Duration::from_secs(3), "slow shutdown {:?}", t.elapsed());
+        assert!(!super::video_playing());
+    }
+
+    /// `BYTEFLOW_TEST_AUDIO=<song.mp3> cargo test --release -p byteflow -- --ignored streamed`
+    #[test]
+    #[ignore = "needs BYTEFLOW_TEST_AUDIO pointing at an audio file"]
+    fn streamed_audio_plays() {
+        let path = std::env::var("BYTEFLOW_TEST_AUDIO").expect("BYTEFLOW_TEST_AUDIO");
+        for encrypted in [false, true] {
+            let (pl, _s, _rt) = streamed(&path, encrypted);
+            pl.set_muted(true);
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(10) && pl.status().position < 1.0 {
+                assert!(pl.status().error.is_none(), "{:?}", pl.status().error);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let st = pl.status();
+            assert!(st.ready && st.has_audio && !st.has_video, "{st:?}");
+            assert!(st.position >= 1.0, "not advancing: {st:?}");
+            assert!(!super::video_playing(), "audio isn't video");
+            pl.seek(st.duration * 0.8);
+            std::thread::sleep(Duration::from_millis(800));
+            assert!(pl.status().position >= st.duration * 0.75, "{:?}", pl.status());
+        }
     }
 }

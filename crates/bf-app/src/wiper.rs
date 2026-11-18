@@ -67,7 +67,9 @@ pub fn wipe(core: &Core) {
     for e in core.secure.overwrite_and_delete_all(vkeys::WIPE_PENDING) {
         log_warn!("wipe secure key: {}", e.developer_message());
     }
-    // 3. The app DB (close the handle so the file can go on Windows).
+    // 3. The app DB (close the handle so the file can go on Windows), and
+    //    every other bucket's databases, which live under app-support.
+    core.close_secondary_buckets();
     step("app db close", core.app_db.close());
     for f in sqlite_files(&core.paths.app_db()) {
         if f.exists() {

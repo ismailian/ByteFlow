@@ -16,6 +16,8 @@ pub const AAD_CREDENTIALS: &[u8] = b"r2vault.v1.credentials";
 pub const AAD_DEK_PWD: &[u8] = b"r2vault.v1.dek.pwd";
 pub const AAD_FILE_MASTER: &[u8] = b"r2vault.v1.file.master";
 pub const AAD_FILE_KEY: &[u8] = b"r2vault.v1.file.key";
+/// The desktop's sealed list of connected buckets (multi-bucket, 0.4.0).
+pub const AAD_BUCKETS: &[u8] = b"byteflow.desktop.v1.buckets";
 /// Secure-storage blob AAD (desktop-only store; see `bf-data::secure`).
 pub const AAD_SECURE_STORE: &[u8] = b"byteflow.desktop.v1.secure_store";
 

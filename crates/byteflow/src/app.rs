@@ -16,12 +16,13 @@ use crate::platform;
 use crate::platform::instance::InstanceGuard;
 use crate::theme;
 use crate::ui::icons;
-use crate::ui::{onboarding::Onboarding, shell::Shell, unlock::Unlock};
+use crate::ui::{home::Home, onboarding::Onboarding, shell::Shell, unlock::Unlock};
 
 pub struct ByteFlowApp {
     ctx: AppCtx,
     onboarding: Onboarding,
     unlock: Unlock,
+    home: Home,
     shell: Option<Shell>,
     last_activity: Instant,
     capture_applied: bool,
@@ -42,6 +43,9 @@ impl ByteFlowApp {
             #[cfg(feature = "dev-env")]
             if crate::demo::enabled() {
                 auth.submit_password(zeroize::Zeroizing::new(crate::demo::PASSWORD.as_bytes().to_vec())).await;
+                if crate::demo::env("BYTEFLOW_DEV_PAGE").as_deref() != Some("home") {
+                    let _ = auth.open_bucket(bf_app::buckets::PRIMARY_BUCKET_ID).await;
+                }
             }
         });
         let repaint = cc.egui_ctx.clone();
@@ -52,6 +56,7 @@ impl ByteFlowApp {
             ctx,
             onboarding: Onboarding::default(),
             unlock: Unlock::default(),
+            home: Home::default(),
             shell: None,
             last_activity: Instant::now(),
             capture_applied,
@@ -152,6 +157,12 @@ impl eframe::App for ByteFlowApp {
         if !self.capture_applied {
             self.capture_applied = platform::window::exclude_from_capture(frame);
         }
+        #[cfg(feature = "dev-env")]
+        if let Some(z) = crate::demo::env("BYTEFLOW_DEV_ZOOM").and_then(|z| z.parse::<f32>().ok())
+            && (ctx.zoom_factor() - z).abs() > 0.001
+        {
+            ctx.set_zoom_factor(z);
+        }
         let mode = self.ctx.prefs().theme_mode;
         if self.theme_mode != Some(mode) {
             theme::apply(&ctx, mode);
@@ -195,22 +206,38 @@ impl eframe::App for ByteFlowApp {
                     self.ctx.toasts.clear();
                 }
                 self.onboarding = Onboarding::default();
+                self.home = Home::default();
                 self.unlock.ui(ui, &self.ctx, error.as_deref());
             }
             VaultState::Unlocked => {
                 let Some(session) = self.ctx.session() else {
-                    egui::CentralPanel::default().show(ui, |ui| ui.centered_and_justified(|ui| ui.spinner()));
+                    // No bucket open: the bucket grid.
+                    if let Some(mut s) = self.shell.take() {
+                        s.cleanup_temps();
+                    }
+                    if self.home.ui(ui, &self.ctx) {
+                        self.lock_now();
+                    }
+                    self.privacy_overlay(&ctx);
+                    self.toasts(&ctx);
                     return;
                 };
                 let id = Arc::as_ptr(&session) as usize;
                 if self.shell.is_none() || self.session_id != id {
+                    if let Some(mut old) = self.shell.take() {
+                        old.cleanup_temps();
+                    }
                     self.shell = Some(Shell::new(&self.ctx, &session));
                     self.session_id = id;
                     self.last_activity = Instant::now();
                 }
-                let lock = self.shell.as_mut().expect("set above").ui(ui, &self.ctx, &session);
+                let shell = self.shell.as_mut().expect("set above");
+                let lock = shell.ui(ui, &self.ctx, &session);
                 if lock {
                     self.lock_now();
+                } else if shell.take_switch_bucket() {
+                    let auth = self.ctx.auth.clone();
+                    self.ctx.spawn(async move { auth.close_bucket().await });
                 }
             }
         }

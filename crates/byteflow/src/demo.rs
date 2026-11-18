@@ -136,6 +136,7 @@ pub async fn seed(core: &Arc<Core>) {
     core.vault.set_destruction_password(DESTRUCTION.as_bytes()).expect("demo: destruction password");
     core.credentials.setup(&cfg, PASSWORD.as_bytes(), false).expect("demo: credentials");
     core.vault.mark_passwords_set().expect("demo: passwords set");
+    seed_more_buckets(core, &cfg).await;
 
     let now = bf_app::now_ms();
     let mut folders = std::collections::BTreeSet::new();
@@ -212,6 +213,28 @@ pub async fn seed(core: &Arc<Core>) {
         let _ = core.app_db.insert_link(SharedLink { id: id.into(), remote_key: key.into(), created_at: now - ago_h * 3_600_000, expires_at: now + (ttl_h - ago_h) * 3_600_000 }).await;
     }
     apply_prefs(core);
+}
+
+/// Two more (made-up) buckets for the bucket grid, each with a small listing.
+async fn seed_more_buckets(core: &Arc<Core>, primary: &R2Config) {
+    use bf_app::buckets::{BucketEntry, PRIMARY_BUCKET_ID};
+    let dek = core.credentials.unwrap_dek_with_password(PASSWORD.as_bytes()).expect("demo: dek");
+    let mut list = vec![BucketEntry { id: PRIMARY_BUCKET_ID.into(), config: primary.clone() }];
+    let extra = [
+        ("demowork0000000000000000000000001", "work-archive", None, 140u64, 2 * 1024 * MB),
+        ("demofamily00000000000000000000002", "family-photos", Some("https://3f9c2a7b5d1e4f60a8b9c0d1e2f3a4b5.eu.r2.cloudflarestorage.com"), 860, 31 * 1024 * MB),
+    ];
+    let now = bf_app::now_ms();
+    for (id, bucket, endpoint, files, bytes) in extra {
+        let mut cfg = primary.clone();
+        cfg.bucket = bucket.into();
+        cfg.endpoint = endpoint.map(str::to_string);
+        list.push(BucketEntry { id: id.into(), config: cfg });
+        let stores = core.bucket_stores(id).expect("demo: stores");
+        let entries: Vec<CacheEntry> = (0..files).map(|i| CacheEntry::file(&format!("item-{i:04}.bin"), bytes / files, None, Some(now - (i as i64) * DAY / 3))).collect();
+        stores.cache_db.replace_all(entries, now - 26 * 60 * 60_000).await.expect("demo: cache");
+    }
+    core.credentials.seal_buckets(&dek, &list).expect("demo: buckets");
 }
 
 fn apply_prefs(core: &Arc<Core>) {

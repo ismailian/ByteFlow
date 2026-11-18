@@ -36,6 +36,7 @@ pub struct Shell {
     links: links::LinksPage,
     settings: settings::SettingsPage,
     deletions: broadcast::Receiver<SourceDeletion>,
+    switch_bucket: bool,
 }
 
 /// A sidebar navigation row. Returns the click response.
@@ -64,6 +65,21 @@ fn nav_item(ui: &mut egui::Ui, p: &Palette, icon: &str, label: &str, selected: b
         ui.painter().galley(br.center() - g.size() / 2.0, g, bt);
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The hairline between a side panel and the page, painted inside the
+/// panel's own fill. egui's built-in separator sits in an unfilled one-point
+/// outer margin; at fractional zoom levels that margin and the line land
+/// between physical pixels, so the canvas and the window's clear colour bleed
+/// through as a dark seam. Snapping one physical-pixel-or-wider line to the
+/// panel's edge (inside its clip) keeps it crisp at every zoom.
+fn edge_line(ui: &egui::Ui, p: &Palette, right: bool) {
+    let ppp = ui.ctx().pixels_per_point();
+    let full = ui.clip_rect();
+    let w = ppp.round().max(1.0) / ppp;
+    let x = if right { (full.right() * ppp).floor() / ppp - w } else { (full.left() * ppp).ceil() / ppp };
+    let line = egui::Rect::from_min_max(egui::pos2(x, full.top()), egui::pos2(x + w, full.bottom()));
+    ui.painter().rect_filled(line, CornerRadius::ZERO, p.border);
 }
 
 fn group_label(ui: &mut egui::Ui, p: &Palette, text: &str) {
@@ -97,7 +113,13 @@ impl Shell {
             links: links::LinksPage,
             settings: settings::SettingsPage::default(),
             deletions: session.transfers.source_deletions(),
+            switch_bucket: false,
         }
+    }
+
+    /// The user asked to go back to the bucket grid.
+    pub fn take_switch_bucket(&mut self) -> bool {
+        std::mem::take(&mut self.switch_bucket)
     }
 
     pub fn cleanup_temps(&mut self) {
@@ -155,7 +177,19 @@ impl Shell {
                 });
             });
         let totals = if overview.has_scanned { format!("\n{} in {} files", bf_core::format::bytes(overview.bytes), overview.files) } else { String::new() };
-        chip.response.on_hover_text(format!("Cloudflare R2 · {state}{totals}\n{}", cfg.effective_endpoint()));
+        // The chip is also the way back to the bucket grid.
+        let chip_r = chip.response.rect;
+        let chip_resp = ui.interact(chip_r, egui::Id::unique("nav-bucket-chip"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        if chip_resp.hovered() {
+            ui.painter().rect_stroke(chip_r, CornerRadius::same(10), Stroke::new(1.0, p.border_strong), egui::StrokeKind::Inside);
+        }
+        if chip_resp.on_hover_text(format!("Cloudflare R2 · {state}{totals}\n{}\n\nClick to switch bucket", cfg.effective_endpoint())).clicked() {
+            self.switch_bucket = true;
+        }
+        ui.add_space(2.0);
+        if nav_item(ui, &p, icons::SQUARES_FOUR, "All buckets", false, 0).on_hover_text("Back to your buckets (this one's transfers pause until you reopen it)").clicked() {
+            self.switch_bucket = true;
+        }
 
         let active = snap.running + snap.queued;
         let failed = snap.tasks.iter().filter(|t| t.row.status == TransferStatus::Failed).count();
@@ -244,16 +278,26 @@ impl Shell {
         egui::Panel::left("nav")
             .resizable(false)
             .exact_size(244.0)
+            .show_separator_line(false)
             .frame(egui::Frame::new().fill(p.surface).inner_margin(egui::Margin { left: 14, right: 14, top: 18, bottom: 14 }))
-            .show(ui, |ui| self.sidebar(ui, session, &mut lock));
+            .show(ui, |ui| {
+                edge_line(ui, &p, true);
+                self.sidebar(ui, session, &mut lock)
+            });
 
         if self.page == Page::Files && self.files.details_open(ctx) {
             egui::Panel::right("details")
                 .resizable(true)
                 .default_size(320.0)
                 .size_range(280.0..=460.0)
+                .show_separator_line(false)
                 .frame(egui::Frame::new().fill(p.surface).inner_margin(egui::Margin { left: 18, right: 18, top: 18, bottom: 14 }))
-                .show(ui, |ui| self.files.details_ui(ui, ctx, session));
+                .show(ui, |ui| {
+                    edge_line(ui, &p, false);
+                    self.files.details_ui(ui, ctx, session)
+                });
+        } else {
+            self.files.stop_audio();
         }
 
         egui::CentralPanel::default()

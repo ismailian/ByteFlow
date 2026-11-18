@@ -33,6 +33,35 @@ pub struct SettingsPage {
     pw_task: Option<Task<AppResult<()>>>,
     wipe_open: bool,
     wipe_typed: String,
+    destruction: Destruction,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DestructionEdit {
+    /// Turn on, or change (same form).
+    Set,
+    Off,
+}
+
+/// The optional destruction password (0.4.0): off on fresh installs, on for
+/// installs that set one before.
+#[derive(Default)]
+struct Destruction {
+    enabled: Option<bool>,
+    probe: Option<Task<bool>>,
+    edit: Option<DestructionEdit>,
+    login: String,
+    new: String,
+    new2: String,
+    task: Option<Task<AppResult<()>>>,
+}
+
+impl Destruction {
+    fn wipe(&mut self) {
+        for s in [&mut self.login, &mut self.new, &mut self.new2] {
+            wipe_string(s);
+        }
+    }
 }
 
 impl Drop for SettingsPage {
@@ -40,6 +69,7 @@ impl Drop for SettingsPage {
         for s in [&mut self.cfg_password, &mut self.pw_current, &mut self.pw_new, &mut self.pw_new2] {
             wipe_string(s);
         }
+        self.destruction.wipe();
         if let Some(c) = self.edit_cfg.as_mut() {
             wipe_string(&mut c.secret_access_key);
         }
@@ -62,11 +92,14 @@ impl SettingsPage {
         self.poll(ctx);
         let p = ctx.prefs();
         if self.usage.is_none() && self.usage_val.is_none() {
-            let core = ctx.core.clone();
+            let stores = session.stores.clone();
             self.usage = Some(ctx.task(async move {
-                let c2 = core.clone();
-                tokio::task::spawn_blocking(move || (bf_data::paths::sqlite_size(&c2.cache_db_path()), c2.thumbs.usage_bytes())).await.unwrap_or((0, 0))
+                tokio::task::spawn_blocking(move || (bf_data::paths::sqlite_size(&stores.cache_db.path()), stores.thumbs.usage_bytes())).await.unwrap_or((0, 0))
             }));
+        }
+        if self.destruction.enabled.is_none() && self.destruction.probe.is_none() {
+            let a = ctx.auth.clone();
+            self.destruction.probe = Some(ctx.task(async move { a.destruction_enabled().await }));
         }
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             widgets::heading(ui, "Settings");
@@ -126,6 +159,8 @@ impl SettingsPage {
                     let (a, c, n) = (ctx.auth.clone(), secret(&self.pw_current), secret(&self.pw_new));
                     self.pw_task = Some(ctx.task(async move { a.change_login_password(c, n).await }));
                 }
+                ui.separator();
+                self.destruction_ui(ui, ctx);
             });
             ui.add_space(8.0);
 
@@ -163,7 +198,7 @@ impl SettingsPage {
                 widgets::section(ui, "Storage on this computer");
                 let (cache_sz, thumbs_sz) = self.usage_val.unwrap_or((0, 0));
                 row(ui, "Bucket listing cache", |ui| {
-                    let path = ctx.core.cache_db_path().display().to_string();
+                    let path = session.stores.cache_db.path().display().to_string();
                     ui.add(egui::Label::new(format!("{} · {path}", format::bytes(cache_sz))).truncate()).on_hover_text(path);
                 });
                 ui.horizontal(|ui| {
@@ -176,11 +211,11 @@ impl SettingsPage {
                         self.cache_move = Some(ctx.task(async move { core.set_cache_dir(None).await }));
                     }
                 });
-                widgets::hint(ui, "A cache in a custom folder survives reinstalling and is not erased by a wipe; it holds object names, sizes and dates only — never credentials or contents. Other programs running as you can read it.");
-                row(ui, "Thumbnails", |ui| {
-                    ui.label(format!("{} · {} cached", format::bytes(thumbs_sz), ctx.core.thumbs.count()));
+                widgets::hint(ui, "The location applies to every bucket's cache (each in its own subfolder). A cache in a custom folder survives reinstalling and is not erased by a wipe; it holds object names, sizes and dates only — never credentials or contents. Other programs running as you can read it.");
+                row(ui, "Thumbnails (this bucket)", |ui| {
+                    ui.label(format!("{} · {} cached", format::bytes(thumbs_sz), session.stores.thumbs.count()));
                     if ui.button("Clear").clicked() {
-                        let _ = ctx.core.thumbs.clear();
+                        let _ = session.stores.thumbs.clear();
                         self.usage_val = None;
                     }
                 });
@@ -306,7 +341,108 @@ impl SettingsPage {
         lock
     }
 
+    fn destruction_ui(&mut self, ui: &mut egui::Ui, ctx: &AppCtx) {
+        let d = &mut self.destruction;
+        let p = theme::pal(ui);
+        ui.horizontal(|ui| {
+            widgets::section(ui, "Destruction password");
+            match d.enabled {
+                Some(true) => {
+                    widgets::badge(ui, "On", Tone::Danger);
+                }
+                Some(false) => {
+                    widgets::badge(ui, "Off", Tone::Neutral);
+                }
+                None => {
+                    ui.spinner();
+                }
+            }
+        });
+        widgets::hint(ui, "Optional. Entering it at the unlock screen instead of your login password silently erases every credential, key, queue and temporary file on this computer — it looks like a fresh install. Files in your buckets are not touched. The unlock screen never hints that one exists.");
+        let busy = d.task.is_some();
+        match d.edit {
+            None => {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| match d.enabled {
+                    Some(true) => {
+                        if ui.add(Btn::new(Kind::Secondary, "Change…").icon(icons::PENCIL_SIMPLE)).clicked() {
+                            d.edit = Some(DestructionEdit::Set);
+                        }
+                        if ui.add(Btn::new(Kind::Ghost, "Turn off…").icon(icons::PROHIBIT)).clicked() {
+                            d.edit = Some(DestructionEdit::Off);
+                        }
+                    }
+                    Some(false) if ui.add(Btn::new(Kind::Secondary, "Turn on…").icon(icons::SHIELD_WARNING)).clicked() => {
+                        d.edit = Some(DestructionEdit::Set);
+                    }
+                    _ => {}
+                });
+            }
+            Some(mode) => {
+                ui.add_space(4.0);
+                ui.scope(|ui| {
+                    ui.set_max_width(460.0);
+                    widgets::field(ui, "Login password", |ui| widgets::password_field(ui, &mut d.login, "Confirms it's you"));
+                    if mode == DestructionEdit::Set {
+                        widgets::field(ui, "Destruction password", |ui| widgets::password_field(ui, &mut d.new, "At least 10 characters, unlike your login password"));
+                        ui.add_space(-2.0);
+                        widgets::strength_bar(ui, bf_app::strength::strength(&d.new));
+                        ui.add_space(4.0);
+                        widgets::field(ui, "Repeat destruction password", |ui| widgets::password_field(ui, &mut d.new2, "Repeat"));
+                    }
+                });
+                let valid = match mode {
+                    DestructionEdit::Set => bf_app::strength::validate_destruction(&d.login, &d.new, &d.new2),
+                    DestructionEdit::Off => Ok(()),
+                };
+                if let Err(msg) = &valid
+                    && !d.new2.is_empty()
+                {
+                    ui.label(RichText::new(msg).size(12.5).color(p.danger));
+                }
+                ui.horizontal(|ui| {
+                    let ok = valid.is_ok() && !d.login.is_empty() && !busy;
+                    let clicked = match mode {
+                        DestructionEdit::Set => widgets::primary_enabled(ui, ok, if d.enabled == Some(true) { "Save new password" } else { "Turn on" }).clicked(),
+                        DestructionEdit::Off => widgets::danger(ui, ok, "Turn off").clicked(),
+                    };
+                    if clicked {
+                        let (a, l, n) = (ctx.auth.clone(), secret(&d.login), secret(&d.new));
+                        d.task = Some(match mode {
+                            DestructionEdit::Set => ctx.task(async move { a.set_destruction_password(l, n).await }),
+                            DestructionEdit::Off => ctx.task(async move { a.disable_destruction_password(l).await }),
+                        });
+                        d.wipe();
+                    }
+                    if ui.add_enabled(!busy, egui::Button::new("Cancel")).clicked() {
+                        d.edit = None;
+                        d.wipe();
+                    }
+                    if busy {
+                        ui.spinner();
+                    }
+                });
+            }
+        }
+    }
+
     fn poll(&mut self, ctx: &AppCtx) {
+        if let Some(v) = self.destruction.probe.as_ref().and_then(Task::poll) {
+            self.destruction.probe = None;
+            self.destruction.enabled = Some(v);
+        }
+        if let Some(r) = self.destruction.task.as_ref().and_then(Task::poll) {
+            self.destruction.task = None;
+            match r {
+                Ok(()) => {
+                    let was_off = self.destruction.edit == Some(DestructionEdit::Off);
+                    ctx.toasts.ok(if was_off { "Destruction password turned off." } else { "Destruction password saved." });
+                    self.destruction.edit = None;
+                    self.destruction.enabled = None;
+                }
+                Err(e) => ctx.toasts.error(message_for(&e)),
+            }
+        }
         if let Some(v) = self.usage.as_ref().and_then(Task::poll) {
             self.usage = None;
             self.usage_val = Some(v);

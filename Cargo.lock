@@ -308,7 +308,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bf-app"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "bf-core",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "bf-cli"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "bf-core",
  "zeroize",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "bf-core"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "bf-data"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "bf-core",
@@ -486,7 +486,7 @@ checksum = "87a0cf66fd1eb2fb7b822cb78370d82303750809bc6ba855f3f58e517d3238db"
 
 [[package]]
 name = "byteflow"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "bf-app",
  "bf-core",

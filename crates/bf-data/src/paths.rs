@@ -48,6 +48,11 @@ impl AppPaths {
     pub fn thumbs(&self) -> PathBuf {
         self.support.join("thumbs")
     }
+    /// A secondary bucket's private folder (multi-bucket, see
+    /// `bf_app::buckets`). The primary bucket uses the support root itself.
+    pub fn bucket_dir(&self, id: &str) -> PathBuf {
+        self.support.join("buckets").join(id)
+    }
     pub fn secure_store(&self) -> PathBuf {
         self.support.join("secure_store.bin")
     }

@@ -32,22 +32,28 @@ pub fn strength_label(s: u8) -> &'static str {
     ["Very weak", "Weak", "Fair", "Strong", "Very strong"][s.min(4) as usize]
 }
 
-/// Validate the onboarding pair. Returns a human sentence on failure.
-pub fn validate_pair(login: &str, login2: &str, destruction: &str, destruction2: &str) -> Result<(), String> {
+/// Validate a new login password and its repeat. Returns a human sentence.
+pub fn validate_login(login: &str, login2: &str) -> Result<(), String> {
     if login.chars().count() < MIN_PASSWORD_LEN {
         return Err(format!("The password must be at least {MIN_PASSWORD_LEN} characters."));
     }
     if login != login2 {
         return Err("The passwords don't match.".into());
     }
+    Ok(())
+}
+
+/// Validate a new destruction password (and its repeat) against the login
+/// password it must differ from.
+pub fn validate_destruction(login: &str, destruction: &str, destruction2: &str) -> Result<(), String> {
     if destruction.chars().count() < MIN_PASSWORD_LEN {
-        return Err(format!("The second password must be at least {MIN_PASSWORD_LEN} characters."));
+        return Err(format!("The destruction password must be at least {MIN_PASSWORD_LEN} characters."));
     }
     if destruction != destruction2 {
-        return Err("The second passwords don't match.".into());
+        return Err("The destruction passwords don't match.".into());
     }
     if login == destruction {
-        return Err("The two passwords must be different.".into());
+        return Err("The destruction password must differ from the login password.".into());
     }
     Ok(())
 }
@@ -57,10 +63,13 @@ mod tests {
     use super::*;
     #[test]
     fn rules() {
-        assert!(validate_pair("short", "short", "x", "x").is_err());
-        assert!(validate_pair("aaaaaaaaaa", "aaaaaaaaab", "bbbbbbbbbb", "bbbbbbbbbb").is_err());
-        assert!(validate_pair("aaaaaaaaaa", "aaaaaaaaaa", "aaaaaaaaaa", "aaaaaaaaaa").is_err());
-        assert!(validate_pair("aaaaaaaaaa", "aaaaaaaaaa", "bbbbbbbbbb", "bbbbbbbbbb").is_ok());
+        assert!(validate_login("short", "short").is_err());
+        assert!(validate_login("aaaaaaaaaa", "aaaaaaaaab").is_err());
+        assert!(validate_login("aaaaaaaaaa", "aaaaaaaaaa").is_ok());
+        assert!(validate_destruction("aaaaaaaaaa", "x", "x").is_err());
+        assert!(validate_destruction("aaaaaaaaaa", "bbbbbbbbbb", "bbbbbbbbbc").is_err());
+        assert!(validate_destruction("aaaaaaaaaa", "aaaaaaaaaa", "aaaaaaaaaa").is_err());
+        assert!(validate_destruction("aaaaaaaaaa", "bbbbbbbbbb", "bbbbbbbbbb").is_ok());
         assert!(strength("Tr0ub4dor&3-horse-battery") >= 4);
         assert_eq!(strength("aaaa"), 0);
     }

@@ -9,6 +9,7 @@
 
 pub mod auth;
 pub mod browser;
+pub mod buckets;
 pub mod cache_service;
 pub mod core;
 pub mod encryption;
@@ -18,6 +19,7 @@ pub mod prefs;
 pub mod session;
 pub mod sharing;
 pub mod strength;
+pub mod stream;
 pub mod sync;
 pub mod thumbnails;
 pub mod transfers;

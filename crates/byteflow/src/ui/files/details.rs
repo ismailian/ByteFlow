@@ -1,8 +1,8 @@
 //! The Files page's right-hand details panel: a preview on top (photos), then
 //! name, actions, file information and encryption status. With nothing
 //! selected it is the bucket overview (space used, storage by file type,
-//! uploads this week, largest folders, recent files) plus the current
-//! folder; with several items, the selection.
+//! uploads this week) plus the current folder; with several items, the
+//! selection.
 //!
 //! Photo previews: a stored thumbnail shows at once. A plaintext photo (up to
 //! [`AUTO_MAX`]) is fetched into memory after a short pause on the selection,
@@ -24,6 +24,7 @@ use bf_core::media::{MediaKind, media_kind_for_key};
 use bf_data::local::cache_db::CacheEntry;
 
 use super::FilesPage;
+use super::audio::DockAction;
 use crate::bidi;
 use crate::ctx::{AppCtx, Task};
 use crate::theme::{self, pal};
@@ -118,6 +119,14 @@ impl FilesPage {
             }
         }
 
+        match self.audio.pump(ui.ctx()) {
+            Some(DockAction::OpenViewer(k)) => {
+                let size = session.browser.data().files.iter().find(|e| e.key == k).map_or(0, |e| e.size);
+                self.viewer = Some(crate::ui::viewer::Viewer::open(ctx, session, &k, size));
+            }
+            Some(DockAction::Select(_)) | None => {}
+        }
+
         let title = if self.selection.is_empty() { "Overview" } else { "Details" };
         ui.horizontal(|ui| {
             ui.label(RichText::new(title).font(theme::semibold(15.0)).color(p.text));
@@ -131,14 +140,26 @@ impl FilesPage {
 
         let data = session.browser.data();
         let selected: Vec<String> = self.selection.iter().cloned().collect();
+        // Now playing (when the playing file isn't the one shown below).
+        if self.audio.is_active() && !(selected.len() == 1 && self.audio.key.as_deref() == Some(selected[0].as_str())) {
+            if let Some(DockAction::Select(k)) = self.audio.strip(ui) {
+                let parent = bf_core::media::parent_prefix(&k).to_string();
+                if data.prefix != parent {
+                    self.open_folder(ctx, session, &parent);
+                }
+                self.selection.clear();
+                self.selection.insert(k);
+            }
+            ui.add_space(10.0);
+        }
         let find = |k: &str| data.folders.iter().chain(data.files.iter()).find(|e| e.key == k).cloned();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
             match selected.as_slice() {
-                [] => self.overview(ui, ctx, session, &data),
+                [] => self.overview(ui, session, &data),
                 [k] => match find(k) {
                     Some(e) => self.single(ui, ctx, session, &e),
-                    None => self.overview(ui, ctx, session, &data),
+                    None => self.overview(ui, session, &data),
                 },
                 many => {
                     let entries: Vec<CacheEntry> = many.iter().filter_map(|k| find(k)).collect();
@@ -225,7 +246,11 @@ impl FilesPage {
         let p = *pal(ui);
         let data = session.browser.data();
         let locked = session.encryption.is_locked(&e.key);
-        self.preview_box(ui, ctx, session, e);
+        if !e.is_folder && media_kind_for_key(&e.key) == MediaKind::Audio && super::audio::AudioDock::supported() {
+            self.audio.card(ui, ctx, session, &e.key, locked);
+        } else {
+            self.preview_box(ui, ctx, session, e);
+        }
         ui.add_space(8.0);
         bidi::wrapped(ui, bf_core::media::leaf_name(&e.key), theme::semibold(16.0), p.text);
         ui.add_space(-4.0);
@@ -380,10 +405,9 @@ impl FilesPage {
     }
 
     /// Nothing selected: the bucket at a glance (space used, the split by file
-    /// type, uploads this week, the largest folders, the latest files), then
-    /// the current folder when it isn't the root. Everything comes from the
-    /// local listing cache.
-    fn overview(&mut self, ui: &mut egui::Ui, ctx: &AppCtx, session: &Arc<Session>, data: &bf_app::browser::BrowserData) {
+    /// type, uploads this week), then the current folder when it isn't the
+    /// root. Everything comes from the local listing cache.
+    fn overview(&mut self, ui: &mut egui::Ui, session: &Arc<Session>, data: &bf_app::browser::BrowserData) {
         let p = *pal(ui);
         let o = session.overview.data();
         let bucket = session.config().bucket.clone();
@@ -461,36 +485,6 @@ impl FilesPage {
         });
         ui.add_space(4.0);
         self.uploads_chart(ui, &o.histogram, colors[0]);
-
-        // Largest folders at the root.
-        if !o.root_folders.is_empty() {
-            ui.add_space(4.0);
-            widgets::divider(ui);
-            widgets::eyebrow(ui, "LARGEST FOLDERS");
-            ui.add_space(2.0);
-            for (f, u) in o.root_folders.iter().take(5) {
-                let resp = link_row(ui, f, true, bf_core::media::leaf_name(f), &format::bytes(u.bytes));
-                if resp.on_hover_text(format!("{} in {}", format::bytes(u.bytes), count(u.files, "file"))).clicked() {
-                    self.open_folder(ctx, session, f);
-                }
-            }
-        }
-
-        // The latest uploads: opening one shows it in its folder, selected.
-        if !o.recent.is_empty() {
-            ui.add_space(4.0);
-            widgets::divider(ui);
-            widgets::eyebrow(ui, "RECENT FILES");
-            ui.add_space(2.0);
-            for e in o.recent.iter().take(5) {
-                let age = e.last_modified_ms.map(|t| format::relative_age(t, now)).unwrap_or_default();
-                if link_row(ui, &e.key, false, bf_core::media::leaf_name(&e.key), &age).on_hover_text(bidi::path(&format!("/{}", e.key))).clicked() {
-                    let parent = bf_core::media::parent_prefix(&e.key).to_string();
-                    self.open_folder(ctx, session, &parent);
-                    self.selection.insert(e.key.clone());
-                }
-            }
-        }
 
         // The folder on screen, below the root.
         if !data.prefix.is_empty() {
@@ -575,24 +569,6 @@ fn segment_widths(values: &[u64], width: f32, gap: f32, min: f32) -> Vec<f32> {
         }
     }
     w
-}
-
-/// A clickable list row: type tile, name (truncated, right-to-left aware)
-/// and a figure on the right.
-fn link_row(ui: &mut egui::Ui, key: &str, is_folder: bool, name: &str, figure: &str) -> egui::Response {
-    let p = *pal(ui);
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(8), p.surface_2);
-    }
-    widgets::paint_file_tile(ui, egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.center().y), vec2(24.0, 24.0)), key, is_folder);
-    let fig = ui.painter().layout_no_wrap(figure.to_owned(), theme::regular(12.5), p.text_muted);
-    let fig_w = fig.size().x;
-    ui.painter().galley(egui::pos2(rect.right() - 6.0 - fig_w, rect.center().y - fig.size().y / 2.0), fig, p.text_muted);
-    let name_r = egui::Rect::from_min_max(egui::pos2(rect.left() + 36.0, rect.top()), egui::pos2(rect.right() - 14.0 - fig_w, rect.bottom()));
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(name_r).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    bidi::name(&mut child, name, theme::regular(13.5), p.text);
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 #[cfg(test)]

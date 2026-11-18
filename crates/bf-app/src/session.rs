@@ -1,6 +1,7 @@
-//! The unlocked session graph (spec §2.4). Every session-scoped service is
-//! built from the unlocked config; locking drops the graph, cancels all
-//! in-flight work, and wipes session keys.
+//! The open-bucket session graph (spec §2.4). Every session-scoped service is
+//! built from one bucket's config and local stores; locking (or switching to
+//! another bucket) drops the graph, cancels all in-flight work, and wipes the
+//! session's copies of the keys.
 
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use bf_core::AppResult;
 use bf_data::r2::{R2Client, R2Config};
 
 use crate::browser::BrowserController;
+use crate::buckets::BucketStores;
 use crate::cache_service::BucketCacheService;
 use crate::core::Core;
 use crate::encryption::EncryptionEngine;
@@ -41,6 +43,9 @@ impl ClientHandle {
 
 pub struct Session {
     pub core: Arc<Core>,
+    /// The bucket this session shows, and its local stores.
+    pub bucket_id: String,
+    pub stores: Arc<BucketStores>,
     config: RwLock<R2Config>,
     pub client: ClientHandle,
     pub transfers: Arc<TransferEngine>,
@@ -57,32 +62,34 @@ pub struct Session {
 }
 
 impl Session {
-    pub async fn start(core: Arc<Core>, config: R2Config, keys: LoadedKeys) -> AppResult<Arc<Self>> {
+    pub async fn start(core: Arc<Core>, stores: Arc<BucketStores>, config: R2Config, keys: LoadedKeys) -> AppResult<Arc<Self>> {
         let client = ClientHandle::new(R2Client::new(&config)?);
         let cancel = CancellationToken::new();
         let prefs = core.prefs.get();
         let notifier = core.notifier.clone();
 
-        let encryption = EncryptionEngine::start(core.clone(), client.clone(), keys, cancel.child_token()).await;
-        let thumbs = ThumbnailService::new(core.thumbs.clone(), encryption.clone(), notifier.clone(), cancel.child_token());
+        let encryption = EncryptionEngine::start(core.clone(), &stores, client.clone(), keys, cancel.child_token()).await;
+        let thumbs = ThumbnailService::new(stores.thumbs.clone(), encryption.clone(), notifier.clone(), cancel.child_token());
         let transfers = TransferEngine::new(
-            core.app_db.clone(),
+            stores.app_db.clone(),
             client.clone(),
             core.paths.temp_sub("enc_upload"),
             prefs.transfer_concurrency,
             notifier.clone(),
             cancel.child_token(),
         );
-        let cache = BucketCacheService::new(core.cache_db.clone(), client.clone(), encryption.clone(), thumbs.clone(), notifier.clone());
-        let browser = BrowserController::new(core.cache_db.clone(), prefs.files_sort, notifier.clone());
-        let overview = OverviewController::new(core.cache_db.clone(), notifier.clone());
-        let ops = FileOps::new(core.cache_db.clone(), client.clone(), encryption.clone(), thumbs.clone());
+        let cache = BucketCacheService::new(stores.cache_db.clone(), client.clone(), encryption.clone(), thumbs.clone(), notifier.clone());
+        let browser = BrowserController::new(stores.cache_db.clone(), prefs.files_sort, notifier.clone());
+        let overview = OverviewController::new(stores.cache_db.clone(), notifier.clone());
+        let ops = FileOps::new(stores.cache_db.clone(), client.clone(), encryption.clone(), thumbs.clone());
         let uploads = UploadService::new(client.clone(), encryption.clone(), transfers.clone(), core.paths.temp_sub("enc_upload"));
-        let sync = SyncService::new(core.app_db.clone(), client.clone(), uploads.clone(), encryption.clone(), notifier.clone());
-        let sharing = SharingService::new(core.app_db.clone(), client.clone(), notifier.clone());
+        let sync = SyncService::new(stores.app_db.clone(), client.clone(), uploads.clone(), encryption.clone(), notifier.clone());
+        let sharing = SharingService::new(stores.app_db.clone(), client.clone(), notifier.clone());
 
         let session = Arc::new(Self {
             core: core.clone(),
+            bucket_id: stores.id.clone(),
+            stores,
             config: RwLock::new(config),
             client,
             transfers,
@@ -110,14 +117,14 @@ impl Session {
     /// sync manifest updates.
     fn wire(self: &Arc<Self>) {
         self.transfers.set_hooks(Arc::new(crate::upload::SessionTransferHooks {
-            cache: self.core.cache_db.clone(),
+            cache: self.stores.cache_db.clone(),
             enc: self.encryption.clone(),
             thumbs: self.thumbs.clone(),
             browser: self.browser.clone(),
             overview: self.overview.clone(),
             sync: self.sync.clone(),
         }));
-        let cache = self.core.cache_db.clone();
+        let cache = self.stores.cache_db.clone();
         self.encryption.set_index_hook(Arc::new(move |key: String, epoch: Option<i64>| {
             let cache = cache.clone();
             tokio::spawn(async move {
@@ -146,6 +153,11 @@ impl Session {
         self.client.set(R2Client::new(&cfg)?);
         *self.config.write() = cfg;
         Ok(())
+    }
+
+    /// The master keys held for this bucket (see `EncryptionEngine::export_keys`).
+    pub fn export_keys(&self) -> LoadedKeys {
+        self.encryption.export_keys()
     }
 
     /// Lock: stop everything, wipe keys.

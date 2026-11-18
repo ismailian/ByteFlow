@@ -21,10 +21,12 @@ use bf_core::crypto::secure_bytes::random_bytes;
 use bf_core::crypto::{PasswordHasher, SecretBytes};
 use bf_core::failures_ui::message_for;
 use bf_core::{AppFailure, AppResult, log_warn};
+use bf_data::secure::CredentialStore;
 use bf_data::secure::credential_store::MasterSlot;
 
 use super::keys::{EncryptionSession, EpochKey, LoadedKeys};
 use super::state::{EXTERNAL_EPOCH, EncOp, EncStatus, EncryptTask, StateStore};
+use crate::buckets::BucketStores;
 use crate::core::Core;
 use crate::session::ClientHandle;
 use crate::transfers::uploader::{self, UploadSpec};
@@ -71,6 +73,8 @@ type IndexHook = Arc<dyn Fn(String, Option<i64>) + Send + Sync>;
 
 pub struct EncryptionEngine {
     core: Arc<Core>,
+    /// This bucket's master keys and external-key table.
+    cred: Arc<CredentialStore>,
     client: ClientHandle,
     store: StateStore,
     session: EncryptionSession,
@@ -90,8 +94,8 @@ pub struct EncryptionEngine {
 }
 
 impl EncryptionEngine {
-    pub async fn start(core: Arc<Core>, client: ClientHandle, keys: LoadedKeys, cancel: CancellationToken) -> Arc<Self> {
-        let path = core.paths.encryption_state();
+    pub async fn start(core: Arc<Core>, stores: &BucketStores, client: ClientHandle, keys: LoadedKeys, cancel: CancellationToken) -> Arc<Self> {
+        let path = stores.encryption_state.clone();
         let store = blocking(move || Ok(StateStore::load(path))).await.expect("state load is infallible");
         let session = EncryptionSession::default();
         store.write(|s| {
@@ -120,6 +124,7 @@ impl EncryptionEngine {
         let preview_dir = core.paths.temp_sub("enc_preview");
         let engine = Arc::new(Self {
             core,
+            cred: stores.credentials.clone(),
             client,
             store,
             session,
@@ -240,7 +245,7 @@ impl EncryptionEngine {
     }
 
     async fn derive_and_seal(&self, passphrase: SecretBytes, dek: SecretBytes, slot: MasterSlot) -> AppResult<(SecretBytes, KdfInfo)> {
-        let cred = self.core.credentials.clone();
+        let cred = self.cred.clone();
         blocking(move || {
             let salt = random_bytes(KDF_SALT_LEN);
             let params = cred.kdf_params();
@@ -535,7 +540,7 @@ impl EncryptionEngine {
         // 3. The sealed external-key table (under the file master key).
         let master = self.active_epoch().and_then(|e| self.session.get(e));
         if let Some(m) = &master
-            && let Ok(Some(k)) = self.core.credentials.external_key(&salt_id, &m.key)
+            && let Ok(Some(k)) = self.cred.external_key(&salt_id, &m.key)
             && file_crypto::opens_with_info(&info, &k)
         {
             self.session.put_external_key(&salt_id, &k);
@@ -549,7 +554,7 @@ impl EncryptionEngine {
             Ok(k) => {
                 self.session.put_external_key(&salt_id, &k);
                 if let Some(m) = master {
-                    let cred = self.core.credentials.clone();
+                    let cred = self.cred.clone();
                     let (sid, kk) = (salt_id.clone(), k.to_vec());
                     let _ = blocking(move || cred.store_external_key(&sid, &kk, &m.key)).await;
                 }
@@ -837,7 +842,7 @@ impl EncryptionEngine {
         if let (Some(old), Some(new)) = (active, rekey)
             && all_at_target
         {
-            let cred = self.core.credentials.clone();
+            let cred = self.cred.clone();
             let (ok, nk) = (self.session.get(old), self.session.get(new));
             let r = blocking(move || {
                 if let (Some(o), Some(n)) = (&ok, &nk) {
@@ -859,7 +864,7 @@ impl EncryptionEngine {
             }
         }
         if removing && none_left {
-            let cred = self.core.credentials.clone();
+            let cred = self.cred.clone();
             if blocking(move || cred.delete_all_master()).await.is_ok() {
                 for e in self.session.loaded_epochs() {
                     self.session.remove(e);
@@ -872,6 +877,15 @@ impl EncryptionEngine {
                 self.bump();
             }
         }
+    }
+
+    /// The master keys this session holds, in the shape `start` takes, so a
+    /// bucket can be closed and reopened (switching buckets) without asking
+    /// for the password again. Reflects keys set or rotated this session.
+    pub fn export_keys(&self) -> LoadedKeys {
+        let (active, pending) = self.store.read(|s| (s.active_epoch, s.rekey_to_epoch));
+        let get = |e: Option<i64>| e.and_then(|e| self.session.get(e)).map(|k| (*k).clone());
+        LoadedKeys { active: get(active), pending: get(pending) }
     }
 
     /// Lock: stop tasks, flush state, wipe keys.

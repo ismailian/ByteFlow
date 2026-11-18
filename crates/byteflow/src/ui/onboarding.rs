@@ -1,4 +1,6 @@
-//! Onboarding (spec §3.2): passwords, then R2 config with "Test connection".
+//! Onboarding (spec §3.2): the login password, then R2 config with "Test
+//! connection". The destruction password is optional since 0.4.0 and is
+//! turned on from Settings, so a fresh install never asks for it here.
 
 use eframe::egui::{self, CornerRadius, RichText, Sense, vec2};
 
@@ -16,8 +18,6 @@ use crate::ui::widgets::{self, Btn, Kind, Tone};
 pub struct Onboarding {
     login: String,
     login2: String,
-    destroy: String,
-    destroy2: String,
     error: Option<String>,
     pw_task: Option<Task<Result<(), String>>>,
 
@@ -34,7 +34,7 @@ pub struct Onboarding {
 
 impl Drop for Onboarding {
     fn drop(&mut self) {
-        for s in [&mut self.login, &mut self.login2, &mut self.destroy, &mut self.destroy2, &mut self.secret_key] {
+        for s in [&mut self.login, &mut self.login2, &mut self.secret_key] {
             wipe_string(s);
         }
     }
@@ -107,7 +107,7 @@ impl Onboarding {
             self.pw_task = None;
             match r {
                 Ok(()) => {
-                    for s in [&mut self.login, &mut self.login2, &mut self.destroy, &mut self.destroy2] {
+                    for s in [&mut self.login, &mut self.login2] {
                         wipe_string(s);
                     }
                     self.error = None;
@@ -116,7 +116,7 @@ impl Onboarding {
             }
         }
         let busy = self.pw_task.is_some();
-        shell(ui, 1, "Protect this vault", "Two passwords: one opens the vault, the other erases it.", 540.0, |ui| {
+        shell(ui, 1, "Protect this vault", "One password opens the vault on this computer.", 540.0, |ui| {
             widgets::section(ui, "Login & recovery password");
             widgets::hint(ui, "Unlocks the vault. It is also your recovery path, so keep it safe — it can't be reset.");
             ui.add_space(6.0);
@@ -125,32 +125,23 @@ impl Onboarding {
             widgets::strength_bar(ui, strength::strength(&self.login));
             ui.add_space(4.0);
             widgets::field(ui, "Repeat password", |ui| widgets::password_field(ui, &mut self.login2, "Repeat password"));
-            widgets::divider(ui);
-            widgets::section(ui, "Destruction password");
-            widgets::hint(ui, "Entering this one instead permanently erases all credentials and keys on this computer, silently. It must differ from the login password.");
-            ui.add_space(6.0);
-            widgets::field(ui, "Password", |ui| widgets::password_field(ui, &mut self.destroy, "At least 10 characters"));
-            ui.add_space(-2.0);
-            widgets::strength_bar(ui, strength::strength(&self.destroy));
-            ui.add_space(4.0);
-            widgets::field(ui, "Repeat password", |ui| widgets::password_field(ui, &mut self.destroy2, "Repeat password"));
-            widgets::callout(ui, Tone::Neutral, icons::INFO, "Biometric unlock isn't available on desktop; the password is the only way in.");
+            widgets::callout(ui, Tone::Neutral, icons::INFO, "Biometric unlock isn't available on desktop; the password is the only way in. An optional destruction password, which silently erases this vault, can be turned on later in Settings.");
             if let Some(e) = &self.error {
                 ui.add_space(4.0);
                 widgets::error_text(ui, e);
             }
-            let valid = strength::validate_pair(&self.login, &self.login2, &self.destroy, &self.destroy2);
+            let valid = strength::validate_login(&self.login, &self.login2);
             if let Err(msg) = &valid
                 && !self.login.is_empty()
-                && !self.destroy2.is_empty()
+                && !self.login2.is_empty()
             {
                 ui.add_space(4.0);
                 widgets::hint(ui, msg);
             }
             widgets::modal_footer(ui, |ui| {
                 if ui.add(Btn::new(Kind::Primary, "Continue").icon(icons::ARROW_RIGHT).enabled(valid.is_ok() && !busy)).clicked() {
-                    let (auth, l, d) = (ctx.auth.clone(), secret(&self.login), secret(&self.destroy));
-                    self.pw_task = Some(ctx.task(async move { auth.set_passwords(l, d).await }));
+                    let (auth, l) = (ctx.auth.clone(), secret(&self.login));
+                    self.pw_task = Some(ctx.task(async move { auth.set_login_password(l).await }));
                 }
                 if busy {
                     ui.spinner();

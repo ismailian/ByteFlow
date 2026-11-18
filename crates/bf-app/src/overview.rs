@@ -10,12 +10,8 @@ use parking_lot::RwLock;
 use bf_core::AppResult;
 use bf_core::media::{StorageCategory, storage_category};
 use bf_data::local::CacheDb;
-use bf_data::local::cache_db::{CacheEntry, Usage};
 
 use crate::SharedNotifier;
-
-pub const RECENT_LIMIT: u32 = 8;
-pub const ROOT_FOLDER_CAP: usize = 8;
 
 #[derive(Debug, Clone, Default)]
 pub struct Overview {
@@ -23,8 +19,6 @@ pub struct Overview {
     pub folders: u64,
     pub bytes: u64,
     pub composition: Vec<(StorageCategory, u64, u64)>,
-    pub recent: Vec<CacheEntry>,
-    pub root_folders: Vec<(String, Usage)>,
     /// Oldest → newest, local-time days: (label, uploads).
     pub histogram: Vec<(String, u64)>,
     pub has_scanned: bool,
@@ -78,11 +72,6 @@ impl OverviewController {
             let (n, b) = comp.get(c).copied().unwrap_or_default();
             (*c, n, b)
         }).collect();
-        let roots = self.cache.root_folders().await?;
-        let usages = self.cache.folder_usages(roots.clone()).await?;
-        let mut root_folders: Vec<(String, Usage)> = roots.into_iter().zip(usages).collect();
-        root_folders.sort_by_key(|(_, u)| std::cmp::Reverse(u.bytes));
-        root_folders.truncate(ROOT_FOLDER_CAP);
         let now = Local::now();
         let since = (now - Duration::days(7)).timestamp_millis();
         let meta = self.cache.meta().await?;
@@ -91,8 +80,6 @@ impl OverviewController {
             folders,
             bytes,
             composition,
-            recent: self.cache.recent_files(RECENT_LIMIT).await?,
-            root_folders,
             histogram: histogram(&self.cache.object_timestamps_since(since).await?, now),
             has_scanned: meta.last_scan_completed_at_ms.is_some(),
             last_scan_ms: meta.last_scan_completed_at_ms,

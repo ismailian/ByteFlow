@@ -3,6 +3,7 @@
 
 pub mod encryption;
 pub mod files;
+pub mod home;
 pub mod icons;
 pub mod links;
 pub mod onboarding;

@@ -13,6 +13,7 @@ use bf_core::{AppResult, log_warn};
 use bf_data::secure::CredentialStore;
 use bf_data::secure::credential_store::MasterSlot;
 
+#[derive(Clone)]
 pub struct EpochKey {
     pub key: SecretBytes,
     /// `None` only for an epoch predating v2 (encrypts as v1, §9.7).
@@ -23,13 +24,14 @@ pub struct EpochKey {
 /// Desktop is password-only (§17.2), so loading them here avoids a second
 /// password prompt for every encryption operation; they are session keys and
 /// are wiped on lock exactly as on mobile.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LoadedKeys {
     pub active: Option<EpochKey>,
     pub pending: Option<EpochKey>,
 }
 
 impl LoadedKeys {
+    /// `cred` is the bucket's scoped view (`CredentialStore::scoped`).
     pub fn load(cred: &CredentialStore, dek: &[u8]) -> Self {
         let get = |slot| match cred.open_master(dek, slot) {
             Ok(Some(m)) => Some(EpochKey { key: m.key, kdf: m.kdf }),

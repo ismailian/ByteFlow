@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use bf_app::NoopNotifier;
 use bf_app::auth::{AuthController, GENERIC_UNLOCK_ERROR, VaultState};
+use bf_app::buckets::PRIMARY_BUCKET_ID;
 use bf_app::core::Core;
 use bf_data::paths::AppPaths;
 use bf_data::r2::R2Config;
@@ -38,13 +39,21 @@ async fn onboarding_unlock_and_destruction_wipe() {
     auth.init().await;
     assert_eq!(auth.state(), VaultState::NeedsPasswords);
 
-    // Rules: the two passwords must differ.
-    assert!(auth.set_passwords(secret("same-password"), secret("same-password")).await.is_err());
-    auth.set_passwords(secret("login-password-1"), secret("destroy-password-1")).await.unwrap();
+    // Onboarding asks only for the login password (destruction is optional).
+    assert!(auth.set_login_password(secret("short")).await.is_err());
+    auth.set_login_password(secret("login-password-1")).await.unwrap();
     assert_eq!(auth.state(), VaultState::NeedsConfig);
     auth.save_config(cfg()).await.unwrap();
     assert_eq!(auth.state(), VaultState::Unlocked);
+    // Onboarding opens the new bucket straight away.
     assert_eq!(auth.session().unwrap().config(), cfg());
+    assert!(!auth.destruction_enabled().await, "fresh installs have no destruction password");
+
+    // Turning it on: the login password authorises; the two must differ.
+    assert!(auth.set_destruction_password(secret("login-password-1"), secret("login-password-1")).await.is_err());
+    assert!(auth.set_destruction_password(secret("wrong-login-pw"), secret("destroy-password-1")).await.is_err());
+    auth.set_destruction_password(secret("login-password-1"), secret("destroy-password-1")).await.unwrap();
+    assert!(auth.destruction_enabled().await);
 
     // Some state that the wipe must remove.
     core.thumbs.put("photo.jpg", b"jpeg").unwrap();
@@ -59,9 +68,52 @@ async fn onboarding_unlock_and_destruction_wipe() {
     auth.submit_password(secret("not-the-password")).await;
     assert_eq!(auth.state(), VaultState::Locked { error: Some(GENERIC_UNLOCK_ERROR.into()) });
 
-    // Correct password unlocks.
+    // Correct password unlocks to the bucket grid (no bucket open yet).
     auth.submit_password(secret("login-password-1")).await;
     assert_eq!(auth.state(), VaultState::Unlocked);
+    assert!(auth.session().is_none());
+    assert_eq!(auth.buckets().len(), 1);
+    auth.open_bucket(PRIMARY_BUCKET_ID).await.unwrap();
+    assert_eq!(auth.session().unwrap().bucket_id, PRIMARY_BUCKET_ID);
+
+    // A second bucket: its own stores, keys and listing cache.
+    let mut second = cfg();
+    second.bucket = "second-bucket".into();
+    assert!(auth.add_bucket(secret("wrong-login-pw"), second.clone()).await.is_err());
+    assert!(auth.add_bucket(secret("login-password-1"), cfg()).await.is_err(), "duplicate");
+    let id = auth.add_bucket(secret("login-password-1"), second.clone()).await.unwrap();
+    assert_eq!(auth.buckets().len(), 2);
+    auth.open_bucket(&id).await.unwrap();
+    let s2 = auth.session().unwrap();
+    assert_eq!(s2.config(), second);
+    assert!(s2.stores.cache_db.path().starts_with(paths.bucket_dir(&id)));
+    s2.stores.thumbs.put("only-in-second.jpg", b"jpeg").unwrap();
+    assert!(!core.thumbs.has("only-in-second.jpg"), "thumbnails are per bucket");
+    drop(s2);
+    auth.close_bucket().await;
+    assert!(auth.session().is_none());
+
+    // The bucket list survives a lock.
+    auth.lock().await;
+    assert!(auth.buckets().is_empty());
+    auth.submit_password(secret("login-password-1")).await;
+    assert_eq!(auth.buckets().len(), 2);
+    // Removing erases its local data; the last bucket can't be removed.
+    auth.remove_bucket(secret("login-password-1"), &id).await.unwrap();
+    assert_eq!(auth.buckets().len(), 1);
+    assert!(!paths.bucket_dir(&id).exists());
+    assert!(auth.remove_bucket(secret("login-password-1"), PRIMARY_BUCKET_ID).await.is_err());
+    auth.lock().await;
+
+    // Turning the destruction password off and on again (still the same).
+    auth.submit_password(secret("login-password-1")).await;
+    auth.disable_destruction_password(secret("login-password-1")).await.unwrap();
+    assert!(!auth.destruction_enabled().await);
+    auth.lock().await;
+    auth.submit_password(secret("destroy-password-1")).await;
+    assert_eq!(auth.state(), VaultState::Locked { error: Some(GENERIC_UNLOCK_ERROR.into()) }, "off: just a wrong password");
+    auth.submit_password(secret("login-password-1")).await;
+    auth.set_destruction_password(secret("login-password-1"), secret("destroy-password-1")).await.unwrap();
     auth.lock().await;
 
     // Destruction password: silent wipe → fresh-install onboarding.

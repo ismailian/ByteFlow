@@ -3,6 +3,7 @@
 //! detection and auto-delete review, foreground encrypted downloads, the
 //! built-in viewers and the details panel.
 
+mod audio;
 mod details;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -107,6 +108,7 @@ pub struct FilesPage {
     pick: Option<Task<Option<Vec<PathBuf>>>>,
     scan: Option<Task<AppResult<()>>>,
     details: details::DetailsPane,
+    audio: audio::AudioDock,
     #[cfg(feature = "dev-env")]
     dev_viewed: bool,
 }
@@ -158,6 +160,13 @@ impl FilesPage {
     pub fn cleanup_temps(&mut self) {
         if let Some(v) = self.viewer.as_mut() {
             v.cleanup();
+        }
+    }
+
+    /// Stop sidebar audio (panel hidden, or another page shown).
+    pub fn stop_audio(&mut self) {
+        if self.audio.is_active() {
+            self.audio.stop();
         }
     }
 
@@ -722,6 +731,12 @@ impl FilesPage {
             self.open_folder(ctx, session, &e.key);
         } else if locked {
             ctx.toasts.info("This file is busy with an encryption task. Try again when it finishes.");
+        } else if bf_core::media::media_kind_for_key(&e.key) == bf_core::media::MediaKind::Audio && audio::AudioDock::supported() {
+            // Audio plays in the details panel, not the full-window viewer.
+            self.selection.clear();
+            self.selection.insert(e.key.clone());
+            Self::set_details_open(ctx, true);
+            self.audio.play(ctx, session, &e.key);
         } else {
             self.viewer = Some(Viewer::open(ctx, session, &e.key, e.size));
         }

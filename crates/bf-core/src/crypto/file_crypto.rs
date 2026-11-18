@@ -457,6 +457,128 @@ pub fn decrypt_file(input: &Path, output: &Path, master_key: &[u8], ctl: Control
     })
 }
 
+// ------------------------------------------------------- random access --
+
+/// Random-access decryption of an object held remotely (media streaming).
+///
+/// Segments are independently sealed under `prefix‖index‖last` with the
+/// whole header as AAD, so any run of segments can be fetched with a ranged
+/// GET and opened on its own. Integrity is the same as a full decrypt: a
+/// flipped, moved or swapped segment fails its tag, and a truncated object
+/// fails at its (wrongly flagged) last segment. Plaintext only ever exists in
+/// the caller's memory.
+pub struct SegmentReader {
+    header: Vec<u8>,
+    prefix: Vec<u8>,
+    chunk: u64,
+    total_segs: u64,
+    last_len: u64,
+    plain_len: u64,
+    cipher: aes_gcm::Aes256Gcm,
+}
+
+impl SegmentReader {
+    /// `head` is the start of the object (≥ the full header; the
+    /// [`KEY_HEADER_PROBE_BYTES`] probe always covers it) and `object_len` its
+    /// stored size. Fails on a wrong key or a malformed header.
+    pub fn new(head: &[u8], object_len: u64, master_key: &[u8]) -> AppResult<Self> {
+        let mut c = Cursor { b: head, at: 0 };
+        let is_v2 = take_magic(&mut c)?;
+        if is_v2 {
+            take_kdf(&mut c)?;
+        }
+        let wrapped = take_wrap(&mut c)?;
+        let prefix = c.take(NONCE_PREFIX_LEN)?.to_vec();
+        let chunk_size = c.u32()?;
+        if chunk_size == 0 || chunk_size > MAX_CHUNK_SIZE {
+            return Err(AppFailure::crypto("bad chunk size"));
+        }
+        let header = head[..c.at].to_vec();
+        let content_key = Envelope::open(&wrapped, master_key, AAD_FILE_KEY).map_err(|_| AppFailure::crypto("wrong key"))?;
+        let cipher = envelope::cipher(&content_key)?;
+
+        let header_len = header.len() as u64;
+        let body_len = object_len.saturating_sub(header_len);
+        if object_len < header_len || body_len < TAG_LEN as u64 {
+            return Err(AppFailure::crypto("truncated object"));
+        }
+        let seg_full = chunk_size as u64 + TAG_LEN as u64;
+        let rem = body_len % seg_full;
+        let total_segs = body_len / seg_full + u64::from(rem > 0);
+        let last_len = if rem > 0 { rem } else { seg_full };
+        if last_len < TAG_LEN as u64 {
+            return Err(AppFailure::crypto("corrupt segment"));
+        }
+        let plain_len = body_len - total_segs * TAG_LEN as u64;
+        Ok(Self { header, prefix, chunk: chunk_size as u64, total_segs, last_len, plain_len, cipher })
+    }
+
+    pub fn plain_len(&self) -> u64 {
+        self.plain_len
+    }
+    pub fn chunk_size(&self) -> u64 {
+        self.chunk
+    }
+    pub fn segment_count(&self) -> u64 {
+        self.total_segs
+    }
+
+    /// The ciphertext byte range `[start, end)` holding segments
+    /// `first..first + count` (clamped to the object).
+    pub fn cipher_range(&self, first: u64, count: u64) -> (u64, u64) {
+        let first = first.min(self.total_segs);
+        let end_seg = (first + count).min(self.total_segs);
+        let seg_full = self.chunk + TAG_LEN as u64;
+        let h = self.header.len() as u64;
+        let start = h + first * seg_full;
+        let end = if end_seg == self.total_segs && end_seg > first {
+            h + (end_seg - 1) * seg_full + self.last_len
+        } else {
+            h + end_seg * seg_full
+        };
+        (start, end)
+    }
+
+    /// Open the consecutive segments starting at `first` held in `ct` (the
+    /// bytes of [`Self::cipher_range`]); returns their plaintext.
+    pub fn open_segments(&self, first: u64, ct: &[u8]) -> AppResult<Vec<u8>> {
+        let seg_full = (self.chunk + TAG_LEN as u64) as usize;
+        let n = ct.len().div_ceil(seg_full) as u64;
+        if ct.is_empty() || first + n > self.total_segs || ct.len() < TAG_LEN {
+            return Err(AppFailure::crypto("bad segment range"));
+        }
+        let (want_s, want_e) = self.cipher_range(first, n);
+        if (want_e - want_s) as usize != ct.len() {
+            return Err(AppFailure::crypto("bad segment range"));
+        }
+        let opened: Vec<AppResult<Vec<u8>>> = ct
+            .par_chunks(seg_full)
+            .enumerate()
+            .map(|(j, seg)| {
+                let idx = first + j as u64;
+                if seg.len() < TAG_LEN {
+                    return Err(AppFailure::crypto("corrupt segment"));
+                }
+                let nonce = segment_nonce(&self.prefix, idx, idx == self.total_segs - 1);
+                let ct_end = seg.len() - TAG_LEN;
+                let mut out = seg[..ct_end].to_vec();
+                let tag = Tag::<aes_gcm::Aes256Gcm>::try_from(&seg[ct_end..]).map_err(|_| AppFailure::crypto("authentication failed"))?;
+                self.cipher
+                    .decrypt_inout_detached(&envelope::nonce_from(&nonce)?, &self.header, out.as_mut_slice().into(), &tag)
+                    .map_err(|_| AppFailure::crypto("authentication failed"))?;
+                Ok(out)
+            })
+            .collect();
+        let mut plain = Vec::with_capacity(n as usize * self.chunk as usize);
+        for o in opened {
+            let mut o = o?;
+            plain.extend_from_slice(&o);
+            zeroize::Zeroize::zeroize(&mut o);
+        }
+        Ok(plain)
+    }
+}
+
 // ------------------------------------------------------------ passphrase --
 
 /// One-shot v2 encrypt with a fresh salt (the CLI path).
@@ -579,6 +701,54 @@ mod tests {
         let p = write(d.path(), "ok", &bytes);
         let e5 = decrypt_file(&p, &out, &random_bytes(32), &mut no_control()).unwrap_err();
         assert!(matches!(e5, AppFailure::Crypto { .. }));
+    }
+
+    /// Random access agrees with a full decrypt for every segment run, and
+    /// rejects tampering, swapped segments and truncation.
+    #[test]
+    fn segment_reader_matches_full_decrypt() {
+        let d = tempfile::tempdir().unwrap();
+        for &(len, v2) in &[(0usize, true), (1, false), (64, true), (64 * 7 + 5, true), (64 * 9, false)] {
+            let data: Vec<u8> = (0..len).map(|i| (i * 13 % 251) as u8).collect();
+            let src = write(d.path(), "src", &data);
+            let enc = d.path().join("enc");
+            let key = random_bytes(32);
+            encrypt_file(&src, &enc, &key, 64, v2.then_some(&kdf()), &mut no_control()).unwrap();
+            let bytes = fs::read(&enc).unwrap();
+            let head = &bytes[..bytes.len().min(KEY_HEADER_PROBE_BYTES as usize)];
+            assert!(SegmentReader::new(head, bytes.len() as u64, &random_bytes(32)).is_err(), "wrong key");
+            let r = SegmentReader::new(head, bytes.len() as u64, &key).unwrap();
+            assert_eq!(r.plain_len(), len as u64);
+            let n = r.segment_count();
+            for first in 0..n {
+                for count in 1..=(n - first) {
+                    let (s, e) = r.cipher_range(first, count);
+                    let plain = r.open_segments(first, &bytes[s as usize..e as usize]).unwrap();
+                    let ps = (first * 64) as usize;
+                    let pe = ((first + count) * 64).min(len as u64) as usize;
+                    assert_eq!(plain, data[ps..pe], "len {len} segs {first}+{count}");
+                }
+            }
+            if n >= 2 {
+                // A swapped pair fails.
+                let (s0, e0) = r.cipher_range(0, 1);
+                let (s1, e1) = r.cipher_range(1, 1);
+                if e0 - s0 == e1 - s1 {
+                    let mut swapped = bytes[s1 as usize..e1 as usize].to_vec();
+                    swapped.extend_from_slice(&bytes[s0 as usize..e0 as usize]);
+                    assert!(r.open_segments(0, &swapped).is_err());
+                }
+                // Truncation: the old second-to-last segment isn't flagged last.
+                let cut = bytes.len() as u64 - (r.cipher_range(n - 1, 1).1 - r.cipher_range(n - 1, 1).0);
+                let t = SegmentReader::new(head, cut, &key).unwrap();
+                let (s, e) = t.cipher_range(t.segment_count() - 1, 1);
+                assert!(t.open_segments(t.segment_count() - 1, &bytes[s as usize..e as usize]).is_err());
+            }
+            let (s, e) = r.cipher_range(0, 1);
+            let mut flipped = bytes[s as usize..e as usize].to_vec();
+            flipped[0] ^= 1;
+            assert!(r.open_segments(0, &flipped).is_err());
+        }
     }
 
     #[test]
