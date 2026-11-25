@@ -213,3 +213,7 @@ each case, and each one is easy to change.
 - I haven't run anything against a real R2 bucket, because there were no credentials. The first run should cover: Test connection; Refresh; upload above and below 8 MiB (pause and resume mid-multipart; the fixed upload dialog end to end); download with Range resume; rename, move and delete for files and folders; set an encryption key, upload with encryption on, preview (photo, text, video, audio, and an encrypted video); the details-panel photo fetch; share a link.
 - **Cross-platform byte compatibility** was implemented by mirroring `file_crypto.dart` field by field, but no Dart toolchain was available to round-trip a file. To check: encrypt with `dart run bin/vault_crypto.dart -e` and decrypt with `byteflow-crypto -d`, then the reverse.
 - macOS and Linux code paths (the keychain protector, single instance, opening files) compile only on those targets and have not been built here.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Bundled fonts keep their own licences (SIL OFL 1.1 for Inter and Noto Sans Arabic, MIT for Phosphor Icons; see `crates/byteflow/assets/fonts/LICENSES.md`).

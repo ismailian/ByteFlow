@@ -56,6 +56,7 @@ binaries = [
     { path = "byteflow-crypto", main = false },
 ]
 resources = [
+    { src = "../../LICENSE", target = "licenses/LICENSE.txt" },
     { src = "assets/fonts/LICENSES.md", target = "licenses/FONTS.md" },
     { src = "assets/fonts/OFL-NotoSansArabic.txt", target = "licenses/OFL-NotoSansArabic.txt" },
     { src = "assets/fonts/OFL-Inter.txt", target = "licenses/OFL-Inter.txt" },
