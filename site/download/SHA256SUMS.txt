@@ -1,1 +1,1 @@
-45bd2be037f70ea9deebe43a3c27e24ab849761ff6057f97d3b3a091e8376638  ByteFlow-Setup-0.4.0-windows-x64.exe
+9e9f8849d5eaf1cfa07caff0e0c69dd6f66dbeb4bf68cb8700c42b698f5dc3f4  ByteFlow-Setup-0.5.0-windows-x64.exe

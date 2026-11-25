@@ -12,3 +12,7 @@
   Content-Type: application/vnd.microsoft.portable-executable
   Content-Disposition: attachment
   Cache-Control: public, max-age=3600
+
+/download/latest.json
+  Content-Type: application/json
+  Cache-Control: no-cache
