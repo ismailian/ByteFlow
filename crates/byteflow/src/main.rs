@@ -80,10 +80,12 @@ fn main() -> eframe::Result<()> {
         }
     };
     // Stale plaintext from a crashed preview session never survives a launch.
-    for sub in ["enc_work", "enc_preview", "preview"] {
+    // "updates": a downloaded installer, already applied (or abandoned).
+    for sub in ["enc_work", "enc_preview", "preview", "updates"] {
         let _ = std::fs::remove_dir_all(paths.temp.join(sub));
     }
 
+    let placement = platform::placement::Placement::load(paths.window_state());
     let notifier = Arc::new(EguiNotifier(egui_ctx.clone()));
     let core = match runtime.block_on(bf_app::core::Core::open(paths, notifier)) {
         Ok(c) => c,
@@ -101,8 +103,13 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(if cfg!(feature = "dev-env") { concat!("ByteFlow ", env!("CARGO_PKG_VERSION"), " (dev-env)") } else { "ByteFlow" })
+            // Hidden until the first frame sizes and positions it
+            // (platform::placement: centred 70% × 80% first, then the last
+            // position and size).
+            .with_visible(false)
+            .with_maximized(false)
             .with_inner_size([1320.0, 820.0])
-            .with_min_inner_size([980.0, 600.0])
+            .with_min_inner_size(platform::placement::MIN_SIZE)
             .with_drag_and_drop(true)
             .with_icon(Arc::new(app_icon())),
         persist_window: false,
@@ -115,7 +122,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| {
             let _ = egui_ctx.set(cc.egui_ctx.clone());
-            Ok(Box::new(app::ByteFlowApp::new(cc, rt, core, instance)))
+            Ok(Box::new(app::ByteFlowApp::new(cc, rt, core, instance, placement)))
         }),
     );
     runtime.shutdown_timeout(std::time::Duration::from_secs(3));

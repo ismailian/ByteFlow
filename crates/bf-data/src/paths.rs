@@ -56,6 +56,11 @@ impl AppPaths {
     pub fn secure_store(&self) -> PathBuf {
         self.support.join("secure_store.bin")
     }
+    /// Last normal-state window position and size (not sensitive; erased by
+    /// a wipe with the rest of the support folder).
+    pub fn window_state(&self) -> PathBuf {
+        self.support.join("window.txt")
+    }
     pub fn instance_lock(&self) -> PathBuf {
         self.support.join("instance.lock")
     }

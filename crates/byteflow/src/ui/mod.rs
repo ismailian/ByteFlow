@@ -13,5 +13,6 @@ pub mod sync;
 pub mod thumbs;
 pub mod transfers;
 pub mod unlock;
+pub mod update;
 pub mod viewer;
 pub mod widgets;

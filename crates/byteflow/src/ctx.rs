@@ -23,6 +23,12 @@ impl<T> Clone for Task<T> {
 }
 
 impl<T: Send + 'static> Task<T> {
+    /// A task whose future fills `slot` itself (when the caller needs the
+    /// spawn's `JoinHandle`, e.g. to cancel it).
+    pub fn from_slot(slot: Arc<Mutex<Option<T>>>) -> Self {
+        Self(slot)
+    }
+
     /// Take the result once it's ready.
     pub fn poll(&self) -> Option<T> {
         self.0.lock().take()

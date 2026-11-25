@@ -23,6 +23,7 @@ pub mod stream;
 pub mod sync;
 pub mod thumbnails;
 pub mod transfers;
+pub mod update;
 pub mod upload;
 pub mod wiper;
 

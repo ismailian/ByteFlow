@@ -3,7 +3,7 @@ name = "byteflow"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "ByteFlow Desktop — single-user Cloudflare R2 file vault"
+description = "ByteFlow Desktop â€” single-user Cloudflare R2 file vault"
 
 [[bin]]
 name = "byteflow"
@@ -40,6 +40,36 @@ raw-window-handle = "0.6"
 unicode-bidi = "0.3"
 unicode-segmentation = "1"
 
+# Windows installer: `cargo packager` (NSIS), driven by scripts/installer.ps1.
+# Version comes from the workspace; paths are relative to this crate.
+[package.metadata.packager]
+product-name = "ByteFlow"
+identifier = "app.byteflow.desktop"
+publisher = "ByteFlow"
+copyright = "ByteFlow"
+description = "Your Cloudflare R2 file vault"
+category = "Utility"
+formats = ["nsis"]
+icons = ["assets/icon/byteflow.ico"]
+binaries = [
+    { path = "byteflow", main = true },
+    { path = "byteflow-crypto", main = false },
+]
+resources = [
+    { src = "assets/fonts/LICENSES.md", target = "licenses/FONTS.md" },
+    { src = "assets/fonts/OFL.txt", target = "licenses/OFL-PlusJakartaSans.txt" },
+    { src = "assets/fonts/OFL-NotoSansArabic.txt", target = "licenses/OFL-NotoSansArabic.txt" },
+    { src = "assets/fonts/OFL-Inter.txt", target = "licenses/OFL-Inter.txt" },
+]
+
+[package.metadata.packager.nsis]
+# Custom template: never install into the vault folder, take over the old
+# Inno Setup install (see the header of installer/nsis/installer.nsi).
+template = "../../installer/nsis/installer.nsi"
+installer-mode = "currentUser"
+compression = "lzma"
+installer-icon = "assets/icon/byteflow.ico"
+
 [build-dependencies]
 # Embeds the app icon + version info (build.rs; needs rc.exe from the Windows SDK).
 embed-resource = "3"
@@ -51,6 +81,7 @@ skrifa = "0.44"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",

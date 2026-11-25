@@ -13,7 +13,7 @@ filling `target/debug`.
 ```sh
 scripts\build.ps1 -Bump patch          # bump the version, build, write dist\v<version>\
 scripts\build.ps1 -Test                # same version, run the release test suite first
-scripts\build.ps1 -Bump minor -Installer   # build, then package with Inno Setup
+scripts\build.ps1 -Bump minor -Installer   # build, then package with cargo-packager (NSIS)
 scripts\installer.ps1                  # package an existing dist\v<version>\ only
 scripts\make-icon.ps1                  # redraw the app + installer icon (crates\byteflow\assets\icon\)
 cargo rr                                # cargo run --release -p byteflow
@@ -31,17 +31,35 @@ bump it (`-Bump patch|minor|major`) for every new build. The version also
 shows in the sidebar and in Settings → About. `.vscode/settings.json` makes
 rust-analyzer check with `--release` too.
 
-**Installer.** `-Installer` (or `scripts/installer.ps1` on its own) compiles
-`installer/byteflow.iss` with Inno Setup 7 (or 6.4+; found through `$env:ISCC`,
-the registry or the usual folders) into
-`dist/v<version>/ByteFlow-Setup-<version>-windows-x64.exe` and adds it to
-`SHA256SUMS.txt`. It installs per user by default (no admin prompt; "all
-users" is offered), puts `ByteFlow.exe` and `byteflow-crypto.exe` in
-`%LOCALAPPDATA%\Programs\ByteFlow`, adds a Start menu entry (desktop icon
-optional), asks to close a running ByteFlow, and upgrades in place. Uninstalling
-removes the program only: the vault in `%LOCALAPPDATA%\ByteFlow` stays, and
-Settings → Danger zone erases it. The executables are not code-signed, so
-SmartScreen warns on first run.
+**Installer.** `-Installer` (or `scripts/installer.ps1` on its own) runs
+`cargo packager` (NSIS; `cargo install cargo-packager --locked`, it fetches NSIS
+itself) with the config in `crates/byteflow/Cargo.toml`
+(`[package.metadata.packager]`) and the template `installer/nsis/installer.nsi`,
+and writes `dist/v<version>/ByteFlow-Setup-<version>-windows-x64.exe`, its line
+in `SHA256SUMS.txt`, and `latest.json` (the update manifest). It installs per
+user (no admin prompt) into `%LOCALAPPDATA%\Programs\ByteFlow` — never the
+vault folder — adds a Start menu entry (desktop icon optional), closes a
+running ByteFlow, and upgrades in place. It takes over an install made by the
+old Inno Setup installer (0.4.0 and earlier): same folder, the old uninstaller
+and its Add/Remove Programs entry removed. Uninstalling removes the program
+only: the vault in `%LOCALAPPDATA%\ByteFlow` stays, and Settings → Danger zone
+erases it. Silent flags: `/S` (silent), `/D=<folder>` (install folder), `/NS`
+(no shortcuts), `/R` (start ByteFlow when done). The executables are not
+code-signed, so SmartScreen warns on first run.
+
+**Updates.** At launch the app reads
+`https://byteflow-app.pages.dev/download/latest.json` (`{version, url, sha256,
+size}`). When it names a newer version it offers **Download** / **Close**.
+Download fetches the setup (only from that site, checked against the SHA-256),
+then ByteFlow closes, a hidden helper runs the setup silently, starts the new
+version and deletes the installer. To publish a release, copy the setup and
+`latest.json` from `dist/v<version>/` into `site/download/` and deploy the
+site. Offline or a missing manifest: nothing is shown.
+
+**Window.** The first launch opens centred at 70 % × 80 % of the screen; later
+launches reopen at the last position and size (normal state only, and only if
+that spot is still on a connected monitor). Stored in
+`%LOCALAPPDATA%\ByteFlow\window.txt`.
 
 Build profile: `debug = "line-tables-only"` and no debug info for
 dependencies or build scripts (only relevant if the guard is lifted),
@@ -173,7 +191,8 @@ each case, and each one is easy to change.
 | Details-panel photo preview | A stored thumbnail shows at once. A plaintext photo up to 24 MB is fetched into memory 350 ms after you select it and seeds its thumbnail (like opening it). Encrypted photos are decrypted only when you click "Load preview", and never thumbnailed. | `ui/files/details.rs` |
 | Video thumbnails | Not generated. The type icon is shown instead, which the spec allows as a safe outcome. | `thumbnails.rs` |
 | Arabic text direction (0.3.0) | Names, paths and messages are **left-to-right paragraphs** (the UI is English and left-aligned), so a mixed name keeps its extension on the right and paths read parent → child. Text-file lines and CSV cells use the direction of their first letter. Flip `visual` to `visual_auto` for first-letter direction everywhere. | `bidi.rs` |
-| Installer (0.3.0) | **Per-user install** by default (no admin), all users offered. **Uninstall keeps the vault** (`%LOCALAPPDATA%\ByteFlow`); erasing it stays an explicit action in Settings. Not code-signed. | `installer/byteflow.iss` |
+| Installer (0.5.0) | cargo-packager (NSIS), replacing Inno Setup. **Per-user install** into `%LOCALAPPDATA%\Programs\ByteFlow` (no admin). **Uninstall keeps the vault** (`%LOCALAPPDATA%\ByteFlow`); erasing it stays an explicit action in Settings. Takes over an Inno Setup install. Not code-signed. | `installer/nsis/installer.nsi`, `crates/byteflow/Cargo.toml` |
+| UI font (0.5.0, trial) | **Inter** instead of Plus Jakarta Sans, pending approval. One constant switches back. The bundled Inter files have their Private Use Area mappings removed so Phosphor icons aren't shadowed. | `theme.rs` (`UI_FONT`) |
 
 ## What's verified
 

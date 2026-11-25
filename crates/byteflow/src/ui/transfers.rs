@@ -64,6 +64,7 @@ impl TransfersPage {
             }
             let mut c = session.transfers.concurrency();
             egui::ComboBox::from_id_salt("conc").selected_text(format!("{c} at a time")).width(120.0).show_ui(ui, |ui| {
+                widgets::menu_style(ui);
                 for n in TRANSFER_CONCURRENCY_OPTIONS {
                     ui.selectable_value(&mut c, n, format!("{n} at a time"));
                 }

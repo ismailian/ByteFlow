@@ -16,7 +16,7 @@ use crate::platform;
 use crate::platform::instance::InstanceGuard;
 use crate::theme;
 use crate::ui::icons;
-use crate::ui::{home::Home, onboarding::Onboarding, shell::Shell, unlock::Unlock};
+use crate::ui::{home::Home, onboarding::Onboarding, shell::Shell, unlock::Unlock, update::Updater};
 
 pub struct ByteFlowApp {
     ctx: AppCtx,
@@ -30,10 +30,13 @@ pub struct ByteFlowApp {
     instance: InstanceGuard,
     theme_mode: Option<bf_app::prefs::ThemeMode>,
     session_id: usize,
+    placement: platform::placement::Placement,
+    updater: Updater,
+    last_place_save: Instant,
 }
 
 impl ByteFlowApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, rt: tokio::runtime::Handle, core: Arc<Core>, instance: InstanceGuard) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, rt: tokio::runtime::Handle, core: Arc<Core>, instance: InstanceGuard, placement: platform::placement::Placement) -> Self {
         theme::install_fonts(&cc.egui_ctx);
         let auth = AuthController::new(core.clone());
         let ctx = AppCtx { rt, auth: auth.clone(), core, egui: cc.egui_ctx.clone(), toasts: Toasts::default() };
@@ -52,6 +55,7 @@ impl ByteFlowApp {
         let os_locked = platform::oslock::spawn(move || repaint.request_repaint());
         // Apply capture exclusion as early as possible.
         let capture_applied = platform::window::exclude_from_capture(cc);
+        let updater = Updater::start(&ctx);
         Self {
             ctx,
             onboarding: Onboarding::default(),
@@ -64,6 +68,9 @@ impl ByteFlowApp {
             instance,
             theme_mode: None,
             session_id: 0,
+            placement,
+            updater,
+            last_place_save: Instant::now(),
         }
     }
 
@@ -154,6 +161,12 @@ impl ByteFlowApp {
 impl eframe::App for ByteFlowApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.placement.frame(&ctx);
+        // Persist moves/resizes now and then (on_exit writes the final one).
+        if self.last_place_save.elapsed() >= Duration::from_secs(5) && !ctx.input(|i| i.pointer.any_down()) {
+            self.placement.save();
+            self.last_place_save = Instant::now();
+        }
         if !self.capture_applied {
             self.capture_applied = platform::window::exclude_from_capture(frame);
         }
@@ -173,6 +186,9 @@ impl eframe::App for ByteFlowApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         self.track_activity(&ctx);
+
+        // Launch-time update prompt (a modal over whatever screen is up).
+        self.updater.ui(&self.ctx);
 
         let state = self.ctx.auth.state();
         // Immediate lock on OS session lock / sleep.
@@ -246,6 +262,7 @@ impl eframe::App for ByteFlowApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.placement.save();
         // Flush progress/state and wipe session keys before the process ends.
         let auth = self.ctx.auth.clone();
         let _ = self.ctx.rt.block_on(async move {

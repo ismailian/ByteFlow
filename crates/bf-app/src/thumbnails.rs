@@ -58,11 +58,16 @@ pub struct ThumbnailService {
     encryption: Arc<EncryptionEngine>,
     notifier: SharedNotifier,
     cancel: CancellationToken,
+    /// Captured at construction (inside the runtime): `generate_from_image`
+    /// is called from the UI thread, where `tokio::spawn` panics with
+    /// "there is no reactor running".
+    rt: tokio::runtime::Handle,
 }
 
 impl ThumbnailService {
+    /// Must be called from inside a Tokio runtime.
     pub fn new(store: Arc<ThumbnailStore>, encryption: Arc<EncryptionEngine>, notifier: SharedNotifier, cancel: CancellationToken) -> Arc<Self> {
-        Arc::new(Self { store, encryption, notifier, cancel })
+        Arc::new(Self { store, encryption, notifier, cancel, rt: tokio::runtime::Handle::current() })
     }
 
     fn eligible(&self, key: &str) -> bool {
@@ -88,7 +93,7 @@ impl ThumbnailService {
             return;
         }
         let (me, key, path) = (self.clone(), key.to_string(), path.to_path_buf());
-        tokio::spawn(async move {
+        self.rt.spawn(async move {
             let p = path.clone();
             let jpeg = crate::blocking(move || make_thumbnail_from_path(&p)).await;
             me.store_checked(&key, jpeg);
@@ -101,7 +106,7 @@ impl ThumbnailService {
             return;
         }
         let (me, key) = (self.clone(), key.to_string());
-        tokio::spawn(async move {
+        self.rt.spawn(async move {
             let jpeg = crate::blocking(move || encode_thumb(&img)).await;
             me.store_checked(&key, jpeg);
         });
@@ -134,7 +139,7 @@ impl ThumbnailService {
     pub fn subscribe_to_encryption(self: &Arc<Self>) {
         let mut rx = self.encryption.subscribe();
         let me = self.clone();
-        tokio::spawn(async move {
+        self.rt.spawn(async move {
             loop {
                 tokio::select! {
                     _ = me.cancel.cancelled() => return,

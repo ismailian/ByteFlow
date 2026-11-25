@@ -309,14 +309,6 @@ pub fn badge_icon(ui: &mut Ui, icon: &str, text: &str, tone: Tone) -> Response {
     resp
 }
 
-/// Back-compat for callers that pass a raw colour.
-pub fn pill(ui: &mut Ui, text: &str, color: Color32) {
-    let g = ui.painter().layout_no_wrap(text.to_owned(), theme::medium(11.5), color);
-    let (rect, _) = ui.allocate_exact_size(vec2(g.size().x + 14.0, 20.0), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(10), color.gamma_multiply(0.14));
-    ui.painter().galley(rect.center() - g.size() / 2.0, g, color);
-}
-
 /// Page title (and optional subtitle) with right-aligned actions.
 pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str, actions: impl FnOnce(&mut Ui)) {
     ui.horizontal(|ui| {
@@ -401,19 +393,26 @@ pub fn progress(ui: &mut Ui, frac: f32, text: String) {
 }
 
 /// Strength meter 0–4.
+/// Painted into one 16 px strip (an egui `horizontal` row would be a full
+/// 32 px control tall and leave a gap under the password field).
 pub fn strength_bar(ui: &mut Ui, score: u8) {
     let p = *pal(ui);
     let colors = [p.danger, p.danger, p.warn, p.success, p.success];
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        for i in 0..4u8 {
-            let (r, _) = ui.allocate_exact_size(vec2(44.0, 5.0), Sense::hover());
-            let c = if i < score { colors[score as usize] } else { p.surface_3 };
-            ui.painter().rect_filled(r, 3.0, c);
-        }
-        ui.add_space(6.0);
-        ui.label(RichText::new(bf_app::strength::strength_label(score)).size(12.0).color(p.text_subtle));
-    });
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(460.0), 16.0), Sense::hover());
+    let mut x = rect.left();
+    for i in 0..4u8 {
+        let seg = egui::Rect::from_min_size(egui::pos2(x, rect.center().y - 2.5), vec2(44.0, 5.0));
+        let c = if i < score { colors[score as usize] } else { p.surface_3 };
+        ui.painter().rect_filled(seg, 3.0, c);
+        x += 48.0;
+    }
+    ui.painter().text(
+        egui::pos2(x + 6.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        bf_app::strength::strength_label(score),
+        theme::regular(12.0),
+        p.text_subtle,
+    );
 }
 
 // ------------------------------------------------------------------ inputs --
@@ -434,11 +433,16 @@ pub fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> Response {
 }
 
 /// A visible label above a control (forms never rely on placeholders alone).
+/// Rhythm: label, 4 px, control, 14 px to the next field.
 pub fn field<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.label(RichText::new(label).font(theme::medium(13.0)).color(pal(ui).text));
-    ui.add_space(-1.0);
-    let r = add(ui);
-    ui.add_space(6.0);
+    let r = ui
+        .scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.label(RichText::new(label).font(theme::medium(13.0)).color(pal(ui).text));
+            add(ui)
+        })
+        .inner;
+    ui.add_space(8.0);
     r
 }
 
@@ -625,13 +629,27 @@ pub fn modal_footer(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 
 // ------------------------------------------------------------------- menus --
 
+/// Menu label size: 1 px under body text, so menus stay compact.
+pub const MENU_TEXT_SIZE: f32 = 13.0;
+
 /// Full-width menu row with a leading icon.
 pub fn menu_item(ui: &mut Ui, icon: &str, label: &str, danger: bool) -> Response {
     let p = *pal(ui);
     // The menu's own width (set_min_width by the caller), not all the space
-    // a popup is allowed to grow into.
-    let w = ui.min_rect().width().max(200.0);
-    let (rect, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
+    // a popup is allowed to grow into, but never narrower than the label:
+    // long labels widen the menu instead of spilling past its edge.
+    let font = theme::regular(MENU_TEXT_SIZE);
+    let text_w = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE).size().x);
+    // Every row takes the widest row's width (remembered from the previous
+    // frame), so hover highlights line up.
+    let need = 36.0 + text_w + 16.0;
+    let id = ui.scope_id().with("menu-w");
+    let widest = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
+    let w = ui.min_rect().width().max(200.0).max(need).max(widest);
+    if need > widest {
+        ui.data_mut(|d| d.insert_temp(id, need));
+    }
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
     let l = label.to_owned();
     resp.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &l));
     let hovered = resp.hovered();
@@ -640,9 +658,15 @@ pub fn menu_item(ui: &mut Ui, icon: &str, label: &str, danger: bool) -> Response
     }
     let fg = if danger { p.danger } else { p.text };
     let ic = if danger { p.danger } else if hovered { p.text } else { p.text_muted };
-    ui.painter().text(egui::pos2(rect.left() + 18.0, rect.center().y), Align2::CENTER_CENTER, icon, theme::regular(16.0), ic);
-    ui.painter().text(egui::pos2(rect.left() + 36.0, rect.center().y), Align2::LEFT_CENTER, label, theme::regular(14.0), fg);
+    ui.painter().text(egui::pos2(rect.left() + 18.0, rect.center().y), Align2::CENTER_CENTER, icon, theme::regular(15.0), ic);
+    ui.painter().text(egui::pos2(rect.left() + 36.0, rect.center().y), Align2::LEFT_CENTER, label, font, fg);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Compact text for dropdown lists (ComboBox popups): same size as menu rows.
+pub fn menu_style(ui: &mut Ui) {
+    ui.style_mut().override_font_id = Some(theme::regular(MENU_TEXT_SIZE));
+    ui.spacing_mut().button_padding.y = 4.0;
 }
 
 pub fn menu_separator(ui: &mut Ui) {

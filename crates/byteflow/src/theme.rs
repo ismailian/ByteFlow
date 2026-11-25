@@ -1,6 +1,7 @@
 //! Visual theme: fonts, palette tokens and egui visuals.
 //!
-//! * Text is Plus Jakarta Sans **Regular** (egui's default is Ubuntu Light).
+//! * Text is the UI font ([`UI_FONT`]: Inter on trial, else Plus Jakarta
+//!   Sans) at **Regular** (egui's default is Ubuntu Light).
 //!   egui has no font weights, so Medium/SemiBold/Bold are separate named
 //!   families ([`medium`], [`semibold`], [`bold`]).
 //! * Icons are Phosphor glyphs (`ui::icons`), a fallback font after the text
@@ -18,11 +19,6 @@ use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontF
 use eframe::epaint::text::VariationCoords;
 
 use bf_app::prefs::ThemeMode;
-
-/// Mid-tone status colours that read on both light and dark surfaces.
-pub const DANGER: Color32 = Color32::from_rgb(0xDC, 0x3B, 0x3B);
-pub const SUCCESS: Color32 = Color32::from_rgb(0x1F, 0xA5, 0x5B);
-pub const LOCKED: Color32 = Color32::from_rgb(0x85, 0x55, 0xF0);
 
 /// Semantic colour tokens.
 #[derive(Clone, Copy)]
@@ -156,6 +152,32 @@ const ARABIC_VF: &[u8] = include_bytes!("../assets/fonts/NotoSansArabic-VF.ttf")
 const ARABIC: [(&str, &str, f32); 4] =
     [("pjs-regular", "arabic-regular", 400.0), (MEDIUM, "arabic-medium", 500.0), (SEMIBOLD, "arabic-semibold", 600.0), (BOLD, "arabic-bold", 700.0)];
 
+/// The UI typeface. Inter is on trial (pending approval); switch back with
+/// `UiFont::PlusJakartaSans`. Only the selected face is compiled in (the
+/// match is evaluated at compile time). The family ids below keep their
+/// historic "pjs-" names; they are internal.
+#[allow(dead_code)]
+enum UiFont {
+    PlusJakartaSans,
+    Inter,
+}
+const UI_FONT: UiFont = UiFont::Inter;
+/// Regular, Medium, SemiBold, Bold.
+const UI_FONT_FILES: [&[u8]; 4] = match UI_FONT {
+    UiFont::Inter => [
+        include_bytes!("../assets/fonts/Inter-Regular.ttf"),
+        include_bytes!("../assets/fonts/Inter-Medium.ttf"),
+        include_bytes!("../assets/fonts/Inter-SemiBold.ttf"),
+        include_bytes!("../assets/fonts/Inter-Bold.ttf"),
+    ],
+    UiFont::PlusJakartaSans => [
+        include_bytes!("../assets/fonts/PlusJakartaSans-Regular.ttf"),
+        include_bytes!("../assets/fonts/PlusJakartaSans-Medium.ttf"),
+        include_bytes!("../assets/fonts/PlusJakartaSans-SemiBold.ttf"),
+        include_bytes!("../assets/fonts/PlusJakartaSans-Bold.ttf"),
+    ],
+};
+
 pub fn regular(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
 }
@@ -172,7 +194,7 @@ pub fn mono(size: f32) -> FontId {
     FontId::new(size, FontFamily::Monospace)
 }
 
-/// Install Plus Jakarta Sans + Phosphor. Call once at startup.
+/// Install the UI font ([`UI_FONT`]) + Phosphor. Call once at startup.
 pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
 }
@@ -182,10 +204,11 @@ fn font_definitions() -> FontDefinitions {
     let add = |fonts: &mut FontDefinitions, name: &str, bytes: &'static [u8]| {
         fonts.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
     };
-    add(&mut fonts, "pjs-regular", include_bytes!("../assets/fonts/PlusJakartaSans-Regular.ttf"));
-    add(&mut fonts, MEDIUM, include_bytes!("../assets/fonts/PlusJakartaSans-Medium.ttf"));
-    add(&mut fonts, SEMIBOLD, include_bytes!("../assets/fonts/PlusJakartaSans-SemiBold.ttf"));
-    add(&mut fonts, BOLD, include_bytes!("../assets/fonts/PlusJakartaSans-Bold.ttf"));
+    let [regular, medium, semibold, bold] = UI_FONT_FILES;
+    add(&mut fonts, "pjs-regular", regular);
+    add(&mut fonts, MEDIUM, medium);
+    add(&mut fonts, SEMIBOLD, semibold);
+    add(&mut fonts, BOLD, bold);
     fonts.font_data.insert(
         "phosphor".to_owned(),
         Arc::new(FontData::from_static(include_bytes!("../assets/fonts/Phosphor.ttf")).tweak(egui::FontTweak {
@@ -195,7 +218,7 @@ fn font_definitions() -> FontDefinitions {
         })),
     );
     for (_, name, wght) in ARABIC {
-        // Noto's Arabic sits a little small next to Plus Jakarta Sans.
+        // Noto's Arabic sits a little small next to the Latin UI font.
         let tweak = egui::FontTweak { scale: 1.06, coords: VariationCoords::new([(b"wght", wght)]), ..Default::default() };
         fonts.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(ARABIC_VF).tweak(tweak)));
     }
@@ -373,19 +396,32 @@ mod tests {
         }
     }
 
-    /// Arabic text used to render as tofu: Plus Jakarta Sans has no Arabic
+    /// Phosphor icons live in the Private Use Area. The UI font comes first
+    /// in every family, so any PUA glyph of its own would replace an icon
+    /// (Inter ships 745; the bundled copies have those mappings removed).
+    #[test]
+    fn ui_font_leaves_the_private_use_area_to_icons() {
+        use skrifa::MetadataProvider;
+        for bytes in UI_FONT_FILES {
+            let f = skrifa::FontRef::new(bytes).unwrap();
+            let pua = f.charmap().mappings().filter(|(c, _)| (0xE000..=0xF8FF).contains(c)).count();
+            assert_eq!(pua, 0, "the UI font maps {pua} Private Use Area code points");
+        }
+    }
+
+    /// Arabic text used to render as tofu: the UI font has no Arabic
     /// glyphs, so the bundled Arabic font must cover the script (letters,
     /// presentation forms, Arabic-Indic digits, Persian letters) and keep a
     /// `wght` axis for the four weights.
     #[test]
     fn arabic_font_covers_the_script() {
         use skrifa::MetadataProvider;
-        let pjs = skrifa::FontRef::new(include_bytes!("../assets/fonts/PlusJakartaSans-Regular.ttf")).unwrap();
+        let pjs = skrifa::FontRef::new(UI_FONT_FILES[0]).unwrap();
         let ar = skrifa::FontRef::new(ARABIC_VF).unwrap();
         let (pjs_map, ar_map) = (pjs.charmap(), ar.charmap());
         for c in "ابتثجحخدذرزسشصضطظعغفقكلمنهوي ءآأؤإئةى ٠١٢٣٤٥٦٧٨٩ ،؛؟ پچژگک ی".chars().filter(|c| *c != ' ') {
             assert!(ar_map.map(c).is_some(), "Arabic font lacks U+{:04X}", c as u32);
-            assert!(pjs_map.map(c).is_none(), "Plus Jakarta Sans unexpectedly maps U+{:04X}", c as u32);
+            assert!(pjs_map.map(c).is_none(), "the UI font unexpectedly maps U+{:04X}", c as u32);
         }
         assert!(ar.axes().iter().any(|a| a.tag() == skrifa::Tag::new(b"wght") && a.min_value() <= 400.0 && a.max_value() >= 700.0));
     }

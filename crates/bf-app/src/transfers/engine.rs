@@ -112,6 +112,9 @@ pub struct TransferEngine {
     retry: RetryPolicy,
     dirty: AtomicBool,
     started: AtomicBool,
+    /// Captured in `new` (inside the runtime): `pump` is also reached from
+    /// sync UI-thread calls (`set_concurrency`), where `tokio::spawn` panics.
+    rt: tokio::runtime::Handle,
 }
 
 impl TransferEngine {
@@ -140,6 +143,7 @@ impl TransferEngine {
             retry: RetryPolicy::default(),
             dirty: AtomicBool::new(true),
             started: AtomicBool::new(false),
+            rt: tokio::runtime::Handle::current(),
         })
     }
 
@@ -391,7 +395,7 @@ impl TransferEngine {
             }
             self.live.lock().insert(row.id.clone(), Live { bytes: row.transferred_bytes, last_bytes: row.transferred_bytes, speed: 0.0 });
             let me = self.clone();
-            tokio::spawn(async move {
+            self.rt.spawn(async move {
                 let id = row.id.clone();
                 let _ = me.db.set_status(&id, TransferStatus::Running, None, now_ms()).await;
                 let inner = me.clone();

@@ -11,7 +11,7 @@
 .EXAMPLE
   scripts\build.ps1 -Bump patch     # 0.2.0 -> 0.2.1, then build
   scripts\build.ps1 -Test           # run the release test suite first
-  scripts\build.ps1 -Installer      # also package dist\v<version>\ with Inno Setup
+  scripts\build.ps1 -Installer      # also package dist\v<version>\ (cargo-packager, NSIS)
 #>
 param(
     [ValidateSet('patch', 'minor', 'major')]

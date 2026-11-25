@@ -158,6 +158,23 @@ pub async fn seed(core: &Arc<Core>) {
         }
         entries.push(e);
     }
+    // BYTEFLOW_DEV_ENC_QUEUE=1: a filled encryption queue (for UI work on the
+    // queue; queued tasks run against the fake endpoint and fail).
+    if env("BYTEFLOW_DEV_ENC_QUEUE").is_some() {
+        use bf_app::encryption::{EncOp, EncStatus};
+        let plain: Vec<&str> = FILES.iter().filter(|f| !f.3).map(|f| f.0).collect();
+        let statuses = [EncStatus::Completed, EncStatus::Completed, EncStatus::Failed, EncStatus::Queued, EncStatus::Queued, EncStatus::Queued, EncStatus::Queued];
+        for (i, (key, status)) in plain.iter().zip(statuses).enumerate() {
+            enc.queue.push(bf_app::encryption::state::EncryptTask {
+                id: format!("demo-{i}"),
+                remote_key: key.to_string(),
+                op: if i == 1 { EncOp::Decrypt } else { EncOp::Encrypt },
+                status,
+                error: (status == EncStatus::Failed).then(|| "Network error: the bucket couldn't be reached".to_string()),
+                updated_at_ms: now - i as i64 * 1000,
+            });
+        }
+    }
     entries.extend(folders.iter().map(|f| CacheEntry::folder(f)));
     core.cache_db.replace_all(entries, now - 4 * 60_000).await.expect("demo: cache");
     std::fs::write(core.paths.encryption_state(), serde_json::to_vec(&enc).expect("json")).expect("demo: encryption state");

@@ -76,13 +76,41 @@ impl Drop for SettingsPage {
     }
 }
 
-fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
-    ui.horizontal(|ui| {
-        ui.set_min_height(36.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(230.0, 22.0), egui::Sense::hover());
-        ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, label, theme::medium(14.0), theme::pal(ui).text);
-        add(ui);
+/// Label column width (label + its description), then the control.
+const LABEL_W: f32 = 280.0;
+/// Vertical gap between setting rows.
+const ROW_GAP: f32 = 14.0;
+
+/// One setting: the label (with an optional one-line description under it)
+/// on the left, the control on the right, top-aligned so the label sits
+/// level with a 32 px control.
+fn row(ui: &mut egui::Ui, label: &str, hint: &str, add: impl FnOnce(&mut egui::Ui)) {
+    let p = theme::pal(ui);
+    ui.add_space(ROW_GAP / 2.0);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.allocate_ui_with_layout(egui::vec2(LABEL_W, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_width(LABEL_W - 24.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.add_space(6.0);
+            ui.label(RichText::new(label).font(theme::medium(14.0)).color(p.text));
+            if !hint.is_empty() {
+                ui.add(egui::Label::new(RichText::new(hint).size(12.5).color(p.text_subtle)).wrap());
+            }
+        });
+        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            add(ui);
+        });
     });
+    ui.add_space(ROW_GAP / 2.0);
+}
+
+/// A divider between groups inside one card.
+fn group_divider(ui: &mut egui::Ui) {
+    ui.add_space(12.0);
+    ui.separator();
+    ui.add_space(12.0);
 }
 
 impl SettingsPage {
@@ -107,9 +135,10 @@ impl SettingsPage {
             theme::card(ui).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 widgets::section(ui, "Security");
-                row(ui, "Auto-lock after idle", |ui| {
+                row(ui, "Auto-lock after idle", "Also locks right away when the computer locks or sleeps.", |ui| {
                     let mut v = p.auto_lock_seconds;
                     egui::ComboBox::from_id_salt("autolock").selected_text(format::duration_secs(v)).show_ui(ui, |ui| {
+                        widgets::menu_style(ui);
                         for o in AUTO_LOCK_OPTIONS {
                             ui.selectable_value(&mut v, o, format::duration_secs(o));
                         }
@@ -118,17 +147,18 @@ impl SettingsPage {
                         let _ = ctx.core.prefs.update(|x| x.auto_lock_seconds = v);
                     }
                 });
-                widgets::hint(ui, "The vault also locks immediately when the computer locks or sleeps.");
-                row(ui, "Hide contents when unfocused", |ui| {
+                row(ui, "Hide contents when unfocused", "The window is always covered when minimised.", |ui| {
                     let mut v = p.privacy_blur_on_focus_loss;
-                    if ui.checkbox(&mut v, "Cover the window on every focus loss (always on minimise)").changed() {
+                    ui.add_space(6.0);
+                    if ui.checkbox(&mut v, "Cover the window whenever it loses focus").changed() {
                         let _ = ctx.core.prefs.update(|x| x.privacy_blur_on_focus_loss = v);
                     }
                 });
-                row(ui, "Clear copied links after", |ui| {
+                row(ui, "Clear copied links after", "Copied links never enter Windows clipboard history or cloud clipboard.", |ui| {
                     let mut v = p.clipboard_clear_seconds;
                     let label = |s: u64| if s == 0 { "Never".to_string() } else { format::duration_secs(s) };
                     egui::ComboBox::from_id_salt("clip").selected_text(label(v)).show_ui(ui, |ui| {
+                        widgets::menu_style(ui);
                         for o in [0u64, 30, 60, 120, 300] {
                             ui.selectable_value(&mut v, o, label(o));
                         }
@@ -137,39 +167,42 @@ impl SettingsPage {
                         let _ = ctx.core.prefs.update(|x| x.clipboard_clear_seconds = v);
                     }
                 });
-                widgets::hint(ui, "Copied links are excluded from Windows clipboard history and cloud clipboard.");
-                ui.add_space(4.0);
-                if ui.add(Btn::new(Kind::Secondary, "Lock now").icon(icons::LOCK_SIMPLE)).clicked() {
-                    lock = true;
-                }
-                ui.separator();
+                row(ui, "Lock the vault", "Clears keys from memory until you unlock again.", |ui| {
+                    if ui.add(Btn::new(Kind::Secondary, "Lock now").icon(icons::LOCK_SIMPLE)).clicked() {
+                        lock = true;
+                    }
+                });
+                group_divider(ui);
                 widgets::section(ui, "Change login password");
-                ui.add_space(4.0);
+                ui.add_space(8.0);
                 ui.scope(|ui| {
                     ui.set_max_width(460.0);
                     widgets::field(ui, "Current password", |ui| widgets::password_field(ui, &mut self.pw_current, "Current password"));
-                    widgets::field(ui, "New password", |ui| widgets::password_field(ui, &mut self.pw_new, "At least 10 characters"));
-                    ui.add_space(-2.0);
-                    widgets::strength_bar(ui, bf_app::strength::strength(&self.pw_new));
-                    ui.add_space(4.0);
+                    widgets::field(ui, "New password", |ui| {
+                        let r = widgets::password_field(ui, &mut self.pw_new, "At least 10 characters");
+                        widgets::strength_bar(ui, bf_app::strength::strength(&self.pw_new));
+                        r
+                    });
                     widgets::field(ui, "Repeat new password", |ui| widgets::password_field(ui, &mut self.pw_new2, "Repeat new password"));
                 });
+                ui.add_space(4.0);
                 let ok = self.pw_new.chars().count() >= 10 && self.pw_new == self.pw_new2 && !self.pw_current.is_empty();
                 if widgets::primary_enabled(ui, ok && self.pw_task.is_none(), "Change password").clicked() {
                     let (a, c, n) = (ctx.auth.clone(), secret(&self.pw_current), secret(&self.pw_new));
                     self.pw_task = Some(ctx.task(async move { a.change_login_password(c, n).await }));
                 }
-                ui.separator();
+                group_divider(ui);
                 self.destruction_ui(ui, ctx);
             });
-            ui.add_space(8.0);
+            ui.add_space(16.0);
 
             theme::card(ui).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 widgets::section(ui, "Transfers & sharing");
-                row(ui, "Default share-link validity", |ui| {
+                row(ui, "Default share-link validity", "How long a new share link works.", |ui| {
                     let mut v = p.default_link_ttl_seconds;
                     egui::ComboBox::from_id_salt("ttl").selected_text(format::duration_secs(v)).show_ui(ui, |ui| {
+                        widgets::menu_style(ui);
                         for o in LINK_TTL_PRESETS {
                             ui.selectable_value(&mut v, o, format::duration_secs(o));
                         }
@@ -178,8 +211,11 @@ impl SettingsPage {
                         let _ = ctx.core.prefs.update(|x| x.default_link_ttl_seconds = v);
                     }
                 });
-                row(ui, "Download folder", |ui| {
-                    ui.label(RichText::new(ctx.core.prefs.download_dir().display().to_string()).monospace());
+                row(ui, "Download folder", "Where downloads are saved.", |ui| {
+                    ui.add_space(6.0);
+                    let dir = ctx.core.prefs.download_dir().display().to_string();
+                    ui.add(egui::Label::new(RichText::new(&dir).font(theme::mono(13.0)).color(theme::pal(ui).text)).truncate()).on_hover_text(&dir);
+                    ui.horizontal(|ui| {
                     if ui.button("Change…").clicked() && self.pick_download.is_none() {
                         self.pick_download = Some(ctx.task(async move { tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder()).await.ok().flatten() }));
                     }
@@ -189,20 +225,20 @@ impl SettingsPage {
                     if ui.button("Open").clicked() {
                         crate::platform::open_folder(&ctx.core.prefs.download_dir());
                     }
+                    });
                 });
             });
-            ui.add_space(8.0);
+            ui.add_space(16.0);
 
             theme::card(ui).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 widgets::section(ui, "Storage on this computer");
                 let (cache_sz, thumbs_sz) = self.usage_val.unwrap_or((0, 0));
-                row(ui, "Bucket listing cache", |ui| {
+                row(ui, "Bucket listing cache", "Object names, sizes and dates only — never credentials or contents.", |ui| {
+                    ui.add_space(6.0);
                     let path = session.stores.cache_db.path().display().to_string();
-                    ui.add(egui::Label::new(format!("{} · {path}", format::bytes(cache_sz))).truncate()).on_hover_text(path);
-                });
+                    ui.add(egui::Label::new(RichText::new(format!("{} · {path}", format::bytes(cache_sz))).color(theme::pal(ui).text)).truncate()).on_hover_text(path);
                 ui.horizontal(|ui| {
-                    ui.add_space(238.0);
                     if ui.add_enabled(self.cache_move.is_none(), egui::Button::new("Move…")).clicked() && self.pick_cache.is_none() {
                         self.pick_cache = Some(ctx.task(async move { tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder()).await.ok().flatten() }));
                     }
@@ -211,15 +247,18 @@ impl SettingsPage {
                         self.cache_move = Some(ctx.task(async move { core.set_cache_dir(None).await }));
                     }
                 });
-                widgets::hint(ui, "The location applies to every bucket's cache (each in its own subfolder). A cache in a custom folder survives reinstalling and is not erased by a wipe; it holds object names, sizes and dates only — never credentials or contents. Other programs running as you can read it.");
-                row(ui, "Thumbnails (this bucket)", |ui| {
-                    ui.label(format!("{} · {} cached", format::bytes(thumbs_sz), session.stores.thumbs.count()));
-                    if ui.button("Clear").clicked() {
-                        let _ = session.stores.thumbs.clear();
-                        self.usage_val = None;
-                    }
+                widgets::hint(ui, "Applies to every bucket's cache (each in its own subfolder). A cache in a custom folder survives reinstalling and is not erased by a wipe. Other programs running as you can read it.");
                 });
-                row(ui, "Theme", |ui| {
+                row(ui, "Thumbnails (this bucket)", "Small previews of unencrypted images.", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{} · {} cached", format::bytes(thumbs_sz), session.stores.thumbs.count())).color(theme::pal(ui).text));
+                        if ui.button("Clear").clicked() {
+                            let _ = session.stores.thumbs.clear();
+                            self.usage_val = None;
+                        }
+                    });
+                });
+                row(ui, "Theme", "", |ui| {
                     let mut t = p.theme_mode;
                     widgets::segmented(ui, &mut t, &[(ThemeMode::Light, icons::SUN, "Light"), (ThemeMode::Dark, icons::MOON, "Dark"), (ThemeMode::System, icons::MONITOR, "System")]);
                     if t != p.theme_mode {
@@ -227,7 +266,7 @@ impl SettingsPage {
                     }
                 });
             });
-            ui.add_space(8.0);
+            ui.add_space(16.0);
 
             theme::card(ui).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -246,7 +285,7 @@ impl SettingsPage {
                         }
                     }
                     Some(c) => {
-                        egui::Grid::new("editcfg").num_columns(2).show(ui, |ui| {
+                        egui::Grid::new("editcfg").num_columns(2).spacing([20.0, 10.0]).min_col_width(140.0).show(ui, |ui| {
                             ui.label("Account ID");
                             widgets::text_field(ui, &mut c.account_id, "");
                             ui.end_row();
@@ -288,7 +327,7 @@ impl SettingsPage {
                     }
                 }
             });
-            ui.add_space(8.0);
+            ui.add_space(16.0);
 
             theme::card(ui).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -298,7 +337,7 @@ impl SettingsPage {
                     self.wipe_open = true;
                 }
             });
-            ui.add_space(8.0);
+            ui.add_space(16.0);
 
             theme::card(ui).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -308,7 +347,7 @@ impl SettingsPage {
                     ui.add_space(4.0);
                     ui.vertical(|ui| {
                         ui.label(RichText::new(format!("ByteFlow Desktop {}", crate::ui::shell::VERSION)).font(theme::semibold(14.0)).color(theme::pal(ui).text));
-                        ui.label(RichText::new("Release build · Plus Jakarta Sans and Noto Sans Arabic (OFL) · Phosphor Icons (MIT)").size(12.5).color(theme::muted(ui)));
+                        ui.label(RichText::new("Release build · Inter and Noto Sans Arabic (OFL) · Phosphor Icons (MIT)").size(12.5).color(theme::muted(ui)));
                     });
                 });
             });

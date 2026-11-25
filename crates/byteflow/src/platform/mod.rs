@@ -4,6 +4,8 @@ pub mod clipboard;
 pub mod instance;
 pub mod media;
 pub mod oslock;
+pub mod placement;
+pub mod update;
 pub mod window;
 
 use std::path::Path;

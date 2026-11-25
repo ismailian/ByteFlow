@@ -3,19 +3,25 @@
   Package a finished release build of ByteFlow Desktop as a Windows installer.
 
 .DESCRIPTION
-  Compiles installer\byteflow.iss with Inno Setup (7, or 6.4+) against
-  dist\v<version>\ and writes ByteFlow-Setup-<version>-windows-x64.exe into
-  that same folder, adding it to SHA256SUMS.txt and BUILDINFO.txt.
+  Runs cargo-packager (NSIS) for the byteflow crate, using the config in
+  crates\byteflow\Cargo.toml ([package.metadata.packager]) and the template
+  installer\nsis\installer.nsi, against the release binaries in
+  target\release\ (the ones scripts\build.ps1 just built and copied into
+  dist\v<version>\). The setup is written as
+  dist\v<version>\ByteFlow-Setup-<version>-windows-x64.exe and added to
+  SHA256SUMS.txt and BUILDINFO.txt.
 
   Like the builds, installers are versioned and never overwritten: an
   existing setup for that version is an error.
 
-  ISCC.exe is found through $env:ISCC, the Inno Setup uninstall entries in the
-  registry (per-user and per-machine), or the usual install folders.
+  Needs cargo-packager:  cargo install cargo-packager --locked
+  (it downloads NSIS itself on first use).
+
+  Also writes dist\v<version>\latest.json, the update manifest the app
+  reads from https://byteflow-app.pages.dev/download/latest.json.
 
 .EXAMPLE
   scripts\installer.ps1                  # the current workspace version
-  scripts\installer.ps1 -Version 0.3.0
   scripts\build.ps1 -Bump minor -Installer   # build and package in one go
 #>
 param(
@@ -38,55 +44,47 @@ foreach ($f in "byteflow-$Version-windows-x64.exe", "byteflow-crypto-$Version-wi
         throw "$dist\$f is missing. Build v$Version first (scripts\build.ps1)."
     }
 }
+# target\release must hold the same binaries as dist (cargo-packager reads them there).
+$release = Join-Path $root 'target\release'
+foreach ($pair in @(@('byteflow.exe', "byteflow-$Version-windows-x64.exe"), @('byteflow-crypto.exe', "byteflow-crypto-$Version-windows-x64.exe"))) {
+    $a = Join-Path $release $pair[0]
+    $b = Join-Path $dist $pair[1]
+    if (-not (Test-Path $a) -or (Get-FileHash $a).Hash -ne (Get-FileHash $b).Hash) {
+        throw "target\release\$($pair[0]) is not the v$Version build. Rebuild with scripts\build.ps1."
+    }
+}
+
 $setupName = "ByteFlow-Setup-$Version-windows-x64.exe"
 $setup = Join-Path $dist $setupName
 if (Test-Path $setup) {
     throw "$setup already exists. Installers are versioned: bump and rebuild for a new one."
 }
 
-function Find-Iscc {
-    if ($env:ISCC -and (Test-Path $env:ISCC)) { return $env:ISCC }
-    $keys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
-    $found = Get-ItemProperty $keys -ErrorAction SilentlyContinue |
-        Where-Object { $_.DisplayName -match '^Inno Setup (version )?(\d+)' -and $_.InstallLocation } |
-        Sort-Object { [version]($_.DisplayVersion -replace '[^\d.].*$', '') } -Descending |
-        ForEach-Object { Join-Path $_.InstallLocation 'ISCC.exe' } |
-        Where-Object { Test-Path $_ }
-    if ($found) { return @($found)[0] }
-    foreach ($base in "$env:LOCALAPPDATA\Programs", ${env:ProgramFiles(x86)}, $env:ProgramFiles) {
-        foreach ($v in '7', '6') {
-            $p = Join-Path $base "Inno Setup $v\ISCC.exe"
-            if ($base -and (Test-Path $p)) { return $p }
-        }
-    }
-    throw 'Inno Setup not found. Install it, or point $env:ISCC at ISCC.exe.'
+if (-not (Get-Command cargo-packager -ErrorAction SilentlyContinue)) {
+    throw 'cargo-packager not found. Install it: cargo install cargo-packager --locked'
 }
+$packagerVersion = (& cargo packager --version) -replace '^cargo-packager\s*', ''
+Write-Host "cargo-packager $packagerVersion"
 
-# ISCC.exe carries no version resource: take it from the matching uninstall entry.
-function Get-InnoVersion([string]$iscc) {
-    $dir = (Split-Path -Parent $iscc).TrimEnd('\')
-    $keys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
-    $hit = Get-ItemProperty $keys -ErrorAction SilentlyContinue |
-        Where-Object { $_.DisplayName -match '^Inno Setup' -and $_.InstallLocation -and $_.InstallLocation.TrimEnd('\') -eq $dir } |
-        Select-Object -First 1
-    if ($hit) { return $hit.DisplayVersion }
-    return 'unknown version'
-}
-
-$iscc = Find-Iscc
-$innoVersion = Get-InnoVersion $iscc
-Write-Host "Inno Setup $innoVersion ($iscc)"
+$work = Join-Path $root 'target\packager'
+if (Test-Path $work) { Remove-Item -Recurse -Force $work }
+New-Item -ItemType Directory -Force $work | Out-Null
 
 $old = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
+Push-Location $root
 try {
-    & $iscc /Q "/DAppVersion=$Version" "/DDistDir=$dist" "/O$dist" (Join-Path $root 'installer\byteflow.iss')
-} finally { $ErrorActionPreference = $old }
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $setup)) { throw "ISCC failed (exit $LASTEXITCODE)." }
+    & cargo packager --release -p byteflow -f nsis --binaries-dir $release --out-dir $work
+} finally {
+    Pop-Location
+    $ErrorActionPreference = $old
+}
+if ($LASTEXITCODE -ne 0) { throw "cargo packager failed (exit $LASTEXITCODE)." }
+
+$built = Get-ChildItem $work -Filter '*.exe' -Recurse | Where-Object { $_.Name -like "*$Version*setup*.exe" } | Select-Object -First 1
+if (-not $built) { throw "cargo packager produced no setup in $work." }
+Copy-Item $built.FullName $setup
+Remove-Item -Recurse -Force $work
 
 $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower()
 $sums = Join-Path $dist 'SHA256SUMS.txt'
@@ -95,7 +93,17 @@ $lines = @(if (Test-Path $sums) { Get-Content $sums | Where-Object { $_ -notmatc
 $info = Join-Path $dist 'BUILDINFO.txt'
 if (Test-Path $info) {
     $infoLines = @(Get-Content $info | Where-Object { $_ -notmatch '^Installer:' })
-    [IO.File]::WriteAllLines($info, @($infoLines + "Installer: $setupName (Inno Setup $innoVersion)"))
+    [IO.File]::WriteAllLines($info, @($infoLines + "Installer: $setupName (cargo-packager $packagerVersion, NSIS)"))
 }
+
+# Update manifest (published next to the setup on the site).
+$manifest = [ordered]@{
+    version = $Version
+    url     = "https://byteflow-app.pages.dev/download/$setupName"
+    sha256  = $hash
+    size    = (Get-Item $setup).Length
+}
+[IO.File]::WriteAllText((Join-Path $dist 'latest.json'), ($manifest | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+
 Write-Host ""
 Write-Host ("Installer -> {0} ({1:N0} bytes)" -f $setup, (Get-Item $setup).Length)

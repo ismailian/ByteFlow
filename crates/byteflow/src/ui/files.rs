@@ -486,6 +486,7 @@ impl FilesPage {
                     let mut sort = session.browser.sort();
                     let shown = if narrow { icons::SORT_ASCENDING.to_string() } else { format!("{}  {}", icons::SORT_ASCENDING, sort.label()) };
                     let combo = egui::ComboBox::from_id_salt("sort").selected_text(RichText::new(shown).color(p.text)).width(sort_w).height(320.0).show_ui(ui, |ui| {
+                        widgets::menu_style(ui);
                         for s in BrowserSort::ALL {
                             ui.selectable_value(&mut sort, s, s.label());
                         }
