@@ -1,8 +1,9 @@
 //! Update checker.
 //!
-//! On launch the app fetches [`MANIFEST_URL`] (a small JSON file published
-//! next to the installer on the website) and offers the newer version, if
-//! any. The installer is downloaded over HTTPS from the same site only,
+//! On launch the app fetches [`MANIFEST_URL`] (`latest.json`, attached to
+//! every GitHub release; GitHub redirects `releases/latest/download/` to the
+//! newest one) and offers the newer version, if any. The installer is
+//! downloaded over HTTPS from this repository's releases only,
 //! checked against the manifest's SHA-256, and handed to the platform layer
 //! to run. Nothing about the vault or the user is sent: a plain GET with a
 //! generic user agent.
@@ -18,9 +19,9 @@ use tokio::io::AsyncWriteExt;
 
 use bf_core::{AppFailure, AppResult};
 
-pub const MANIFEST_URL: &str = "https://byteflow-app.pages.dev/download/latest.json";
+pub const MANIFEST_URL: &str = "https://github.com/ismailian/ByteFlow/releases/latest/download/latest.json";
 /// Installers are only ever fetched from here.
-const DOWNLOAD_PREFIX: &str = "https://byteflow-app.pages.dev/download/";
+const DOWNLOAD_PREFIX: &str = "https://github.com/ismailian/ByteFlow/releases/download/";
 /// Refuse anything absurd (the setup is ~8 MB).
 const MAX_INSTALLER_BYTES: u64 = 512 * 1024 * 1024;
 
@@ -177,7 +178,7 @@ mod tests {
     fn manifest_is_validated() {
         let good = Release {
             version: "0.5.0".into(),
-            url: format!("{DOWNLOAD_PREFIX}ByteFlow-Setup-0.5.0-windows-x64.exe"),
+            url: format!("{DOWNLOAD_PREFIX}v0.5.0/ByteFlow-Setup-0.5.0-windows-x64.exe"),
             sha256: "a".repeat(64),
             size: None,
         };
@@ -185,6 +186,8 @@ mod tests {
         assert_eq!(good.file_name(), "ByteFlow-Setup-0.5.0-windows-x64.exe");
         let mut bad = good.clone();
         bad.url = "https://evil.example/ByteFlow.exe".into();
+        assert!(bad.validate().is_err());
+        bad.url = "https://github.com/someone-else/ByteFlow/releases/download/v1.0.0/x.exe".into();
         assert!(bad.validate().is_err());
         let mut bad = good.clone();
         bad.sha256 = "xyz".into();

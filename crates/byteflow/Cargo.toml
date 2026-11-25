@@ -57,7 +57,6 @@ binaries = [
 ]
 resources = [
     { src = "assets/fonts/LICENSES.md", target = "licenses/FONTS.md" },
-    { src = "assets/fonts/OFL.txt", target = "licenses/OFL-PlusJakartaSans.txt" },
     { src = "assets/fonts/OFL-NotoSansArabic.txt", target = "licenses/OFL-NotoSansArabic.txt" },
     { src = "assets/fonts/OFL-Inter.txt", target = "licenses/OFL-Inter.txt" },
 ]

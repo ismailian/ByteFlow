@@ -48,7 +48,7 @@ impl Updater {
         // without the network (for UI work).
         #[cfg(feature = "dev-env")]
         if let Some(v) = crate::demo::env("BYTEFLOW_DEV_FAKE_UPDATE") {
-            let url = format!("https://byteflow-app.pages.dev/download/ByteFlow-Setup-{v}-windows-x64.exe");
+            let url = format!("https://github.com/ismailian/ByteFlow/releases/download/v{v}/ByteFlow-Setup-{v}-windows-x64.exe");
             return Self { state: State::Offer(Release { version: v, url, sha256: "0".repeat(64), size: Some(8_100_000) }) };
         }
         if cfg!(feature = "dev-env") && std::env::var_os("BYTEFLOW_DEV_DEMO").is_some() {

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy · ByteFlow</title>
+  <meta name="description" content="ByteFlow's privacy policy: what the app and this website collect (nearly nothing) and where your data goes.">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="ByteFlow home"><img src="/assets/icon.png" alt="" width="32" height="32">ByteFlow</a>
+  </div>
+</header>
+
+<main id="main" class="legal">
+  <div class="wrap">
+    <article>
+      <h1>Privacy</h1>
+      <p class="legal-updated">Last updated: 25 November 2026</p>
+
+      <p class="lede">ByteFlow is built so that your files, keys and credentials stay with you. We don't run a server that sees your data, and there is no account to create.</p>
+
+      <h2>The ByteFlow app</h2>
+      <ul>
+        <li><strong>Your files go only to your own bucket.</strong> The app talks directly to the Cloudflare R2 bucket you connect. Uploads, downloads, listings and share links travel between your computer and your bucket, and never through us.</li>
+        <li><strong>Credentials and keys stay on your computer.</strong> Your R2 access keys, encryption keys and passwords are stored locally, sealed under your login password and Windows data protection. They are never sent to us.</li>
+        <li><strong>No analytics, telemetry or crash reports.</strong> The app doesn't track usage, doesn't send diagnostics and doesn't write logs to disk.</li>
+        <li><strong>Update check.</strong> When it starts, the app asks GitHub for the latest release (<code>latest.json</code> on the ByteFlow releases page). That request contains no information about you or your vault. GitHub sees your IP address, as with any web request. If you choose to download an update, the installer is also fetched from GitHub.</li>
+        <li><strong>Local data.</strong> A listing cache, thumbnails and settings are kept in <code>%LOCALAPPDATA%\ByteFlow</code> on your computer. Settings → Danger zone → "Wipe everything" erases them. Uninstalling the app keeps them, so a reinstall picks up where you left off.</li>
+      </ul>
+
+      <h2>Cloudflare and GitHub</h2>
+      <p>Your bucket is hosted by Cloudflare under your own Cloudflare account, so Cloudflare's privacy policy and your agreement with Cloudflare apply to what's stored there. Encrypted files are encrypted on your computer with AES-256-GCM before upload, so Cloudflare only holds ciphertext for them. Downloads and the update check are served by GitHub, under GitHub's privacy statement.</p>
+
+      <h2>This website</h2>
+      <p>This site has no cookies, analytics, trackers or third-party scripts. It remembers your light or dark theme choice in your browser's local storage, which never leaves your device. The site is hosted on Cloudflare Pages, which may keep standard technical request logs (such as IP addresses) to run and protect the service.</p>
+
+      <h2>Children</h2>
+      <p>ByteFlow isn't directed at children and we don't knowingly collect anything from anyone, including children.</p>
+
+      <h2>Changes</h2>
+      <p>If this policy changes, the new version is posted on this page with a new date.</p>
+
+      <h2>Contact</h2>
+      <p>Questions about privacy? Open an issue on <a href="https://github.com/ismailian/ByteFlow/issues" rel="noopener">GitHub</a>.</p>
+    </article>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>© 2026 ByteFlow. Cloudflare and R2 are trademarks of Cloudflare, Inc. ByteFlow is not affiliated with Cloudflare.</p>
+    <nav aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/privacy.html" aria-current="page">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="https://github.com/ismailian/ByteFlow" rel="noopener">GitHub</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

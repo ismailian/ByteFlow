@@ -1,6 +1,6 @@
 //! Phosphor icon glyphs (regular weight, MIT — see assets/fonts/LICENSES.md).
 //!
-//! The font is registered as a fallback after Plus Jakarta Sans, so these
+//! The font is registered as a fallback after Inter, so these
 //! private-use codepoints can be mixed into any label.
 
 #![allow(dead_code)]

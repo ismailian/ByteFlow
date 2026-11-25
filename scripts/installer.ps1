@@ -17,8 +17,9 @@
   Needs cargo-packager:  cargo install cargo-packager --locked
   (it downloads NSIS itself on first use).
 
-  Also writes dist\v<version>\latest.json, the update manifest the app
-  reads from https://byteflow-app.pages.dev/download/latest.json.
+  Also writes dist\v<version>\latest.json, the update manifest. Attach it to
+  the GitHub release with the setup: the app reads
+  https://github.com/ismailian/ByteFlow/releases/latest/download/latest.json.
 
 .EXAMPLE
   scripts\installer.ps1                  # the current workspace version
@@ -99,7 +100,7 @@ if (Test-Path $info) {
 # Update manifest (published next to the setup on the site).
 $manifest = [ordered]@{
     version = $Version
-    url     = "https://byteflow-app.pages.dev/download/$setupName"
+    url     = "https://github.com/ismailian/ByteFlow/releases/download/v$Version/$setupName"
     sha256  = $hash
     size    = (Get-Item $setup).Length
 }

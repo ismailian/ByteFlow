@@ -47,14 +47,17 @@ erases it. Silent flags: `/S` (silent), `/D=<folder>` (install folder), `/NS`
 (no shortcuts), `/R` (start ByteFlow when done). The executables are not
 code-signed, so SmartScreen warns on first run.
 
-**Updates.** At launch the app reads
-`https://byteflow-app.pages.dev/download/latest.json` (`{version, url, sha256,
-size}`). When it names a newer version it offers **Download** / **Close**.
-Download fetches the setup (only from that site, checked against the SHA-256),
-then ByteFlow closes, a hidden helper runs the setup silently, starts the new
-version and deletes the installer. To publish a release, copy the setup and
-`latest.json` from `dist/v<version>/` into `site/download/` and deploy the
-site. Offline or a missing manifest: nothing is shown.
+**Updates.** At launch the app reads `latest.json` from the newest GitHub
+release (`https://github.com/ismailian/ByteFlow/releases/latest/download/latest.json`:
+`{version, url, sha256, size}`). When it names a newer version it offers
+**Download** / **Close**. Download fetches the setup (only from this
+repository's releases, checked against the SHA-256), then ByteFlow closes, a
+hidden helper runs the setup silently, starts the new version and deletes the
+installer. To publish a release, attach the setup, the binaries,
+`SHA256SUMS.txt` and `latest.json` from `dist/v<version>/` to the GitHub
+release. The website links to the latest release and hosts no installer.
+Offline or no manifest: nothing is shown. (0.5.0 alone looked for the
+manifest on the website instead.)
 
 **Window.** The first launch opens centred at 70 % × 80 % of the screen; later
 launches reopen at the last position and size (normal state only, and only if
@@ -81,8 +84,8 @@ never enables it, and the window title says `(dev-env)` when it is on:
 
 ## Interface (0.3.0)
 
-- **Type**: Plus Jakarta Sans Regular for text (egui's default was Ubuntu
-  Light), Medium/SemiBold/Bold for buttons and headings, Phosphor icons
+- **Type**: Inter Regular for text (since 0.5.0; Plus Jakarta Sans before,
+  egui's default was Ubuntu Light), Medium/SemiBold/Bold for buttons and headings, Phosphor icons
   instead of emoji. Fonts are bundled (`crates/byteflow/assets/fonts`, OFL
   and MIT).
 - **Arabic** (and Persian, Urdu): Noto Sans Arabic is bundled as a fallback
@@ -192,7 +195,7 @@ each case, and each one is easy to change.
 | Video thumbnails | Not generated. The type icon is shown instead, which the spec allows as a safe outcome. | `thumbnails.rs` |
 | Arabic text direction (0.3.0) | Names, paths and messages are **left-to-right paragraphs** (the UI is English and left-aligned), so a mixed name keeps its extension on the right and paths read parent → child. Text-file lines and CSV cells use the direction of their first letter. Flip `visual` to `visual_auto` for first-letter direction everywhere. | `bidi.rs` |
 | Installer (0.5.0) | cargo-packager (NSIS), replacing Inno Setup. **Per-user install** into `%LOCALAPPDATA%\Programs\ByteFlow` (no admin). **Uninstall keeps the vault** (`%LOCALAPPDATA%\ByteFlow`); erasing it stays an explicit action in Settings. Takes over an Inno Setup install. Not code-signed. | `installer/nsis/installer.nsi`, `crates/byteflow/Cargo.toml` |
-| UI font (0.5.0, trial) | **Inter** instead of Plus Jakarta Sans, pending approval. One constant switches back. The bundled Inter files have their Private Use Area mappings removed so Phosphor icons aren't shadowed. | `theme.rs` (`UI_FONT`) |
+| UI font (0.5.0) | **Inter** replaces Plus Jakarta Sans. The bundled Inter files have their Private Use Area mappings removed so Phosphor icons aren't shadowed (a test checks it). | `theme.rs` |
 
 ## What's verified
 
