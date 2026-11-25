@@ -90,7 +90,13 @@ Remove-Item -Recurse -Force $work
 $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower()
 $sums = Join-Path $dist 'SHA256SUMS.txt'
 $lines = @(if (Test-Path $sums) { Get-Content $sums | Where-Object { $_ -notmatch [regex]::Escape($setupName) } })
-[IO.File]::WriteAllLines($sums, @($lines + "$hash  $setupName"))
+# Same setup under a fixed name: attached to every release, so
+# releases/latest/download/ByteFlow-Setup-windows-x64.exe is always the
+# newest installer (the website's Download button goes there).
+$stableName = 'ByteFlow-Setup-windows-x64.exe'
+Copy-Item $setup (Join-Path $dist $stableName) -Force
+$lines = @($lines | Where-Object { $_ -notmatch [regex]::Escape($stableName) })
+[IO.File]::WriteAllLines($sums, @($lines + "$hash  $setupName" + "$hash  $stableName"))
 $info = Join-Path $dist 'BUILDINFO.txt'
 if (Test-Path $info) {
     $infoLines = @(Get-Content $info | Where-Object { $_ -notmatch '^Installer:' })

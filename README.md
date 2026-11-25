@@ -53,9 +53,13 @@ release (`https://github.com/ismailian/ByteFlow/releases/latest/download/latest.
 **Download** / **Close**. Download fetches the setup (only from this
 repository's releases, checked against the SHA-256), then ByteFlow closes, a
 hidden helper runs the setup silently, starts the new version and deletes the
-installer. To publish a release, attach the setup, the binaries,
-`SHA256SUMS.txt` and `latest.json` from `dist/v<version>/` to the GitHub
-release. The website links to the latest release and hosts no installer.
+installer. To publish a release, attach everything in `dist/v<version>/`
+to the GitHub release: the setup (also copied as
+`ByteFlow-Setup-windows-x64.exe`), the binaries, `SHA256SUMS.txt` and
+`latest.json`. The website's Download button is `/download`, a redirect
+(`site/_redirects`) to
+`releases/latest/download/ByteFlow-Setup-windows-x64.exe`, so it always
+serves the newest installer and the site needs no change per release.
 Offline or no manifest: nothing is shown. (0.5.0 alone looked for the
 manifest on the website instead.)
 

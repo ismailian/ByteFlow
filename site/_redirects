@@ -1,0 +1,3 @@
+# Download button: the newest installer, straight from the latest GitHub release
+# (every release attaches it as ByteFlow-Setup-windows-x64.exe; see scripts/installer.ps1).
+/download  https://github.com/ismailian/ByteFlow/releases/latest/download/ByteFlow-Setup-windows-x64.exe  302
